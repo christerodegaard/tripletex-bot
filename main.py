@@ -733,48 +733,18 @@ def do_register_payment(base_url: str, token: str, payload: dict) -> None:
         print("No invoice found to register payment against")
         return
 
-    # First, GET the invoice to see its structure
-    r_get = tx_get(base_url, token, f"/invoice/{invoice_id}")
-    print(f"GET invoice/{invoice_id} -> {r_get.status_code}: {r_get.text[:500]}")
-
-    if r_get.status_code == 200:
-        inv = r_get.json().get("value", {})
-
-        # Try 1: PUT /invoice/{id}/:payment with ALL fields as query params and empty body
-        url = f"{base_url.rstrip('/')}/invoice/{invoice_id}/:payment"
-        r2 = requests.put(url, auth=tx_auth(token),
-                          params={
-                              "paymentDate": date,
-                              "paidAmount": amount,
-                              "paymentTypeId": 1
-                          },
-                          json={},
-                          timeout=30)
-        print(f"payment (query+emptybody) -> {r2.status_code}: {r2.text[:300]}")
-        if r2.status_code in (200, 201):
-            return
-
-        # Try 2: POST instead of PUT to :payment
-        r3 = requests.post(url, auth=tx_auth(token),
-                           params={"paymentDate": date, "paidAmount": amount, "paymentTypeId": 1},
-                           timeout=30)
-        print(f"POST :payment -> {r3.status_code}: {r3.text[:300]}")
-        if r3.status_code in (200, 201):
-            return
-
-        # Try 3: PUT /invoice/{id} directly to update isPaid/amountPaid fields
-        url2 = f"{base_url.rstrip('/')}/invoice/{invoice_id}"
-        update_body = {**inv, "amountPaid": amount}
-        r4 = requests.put(url2, auth=tx_auth(token), json=update_body, timeout=30)
-        print(f"PUT invoice direct -> {r4.status_code}: {r4.text[:300]}")
-        if r4.status_code in (200, 201):
-            return
-
-        # Try 4: PUT /invoice/{id}/:payment with no content type, just query string
-        url3 = (f"{base_url.rstrip('/')}/invoice/{invoice_id}/:payment"
-                f"?paymentDate={date}&paidAmount={amount}&paymentTypeId=1")
-        r5 = requests.put(url3, auth=tx_auth(token), timeout=30)
-        print(f"payment (url encoded) -> {r5.status_code}: {r5.text[:300]}")
+    url = f"{base_url.rstrip('/')}/invoice/{invoice_id}/:payment"
+    r2 = requests.put(
+        url,
+        auth=tx_auth(token),
+        params={
+            "paymentDate": date,
+            "paymentTypeId": 1,
+            "paidAmount": amount,
+        },
+        timeout=30
+    )
+    print(f"PUT /:payment -> {r2.status_code}: {r2.text[:300]}")
 
 
 def do_create_credit_note(base_url: str, token: str, payload: dict) -> None:
@@ -849,22 +819,13 @@ def do_create_credit_note(base_url: str, token: str, payload: dict) -> None:
         return
 
     url = f"{base_url.rstrip('/')}/invoice/{invoice_id}/:createCreditNote"
-
-    # Try 1: date as query param with no body
-    r4 = requests.put(url, auth=tx_auth(token), params={"date": date}, timeout=30)
-    print(f"PUT createCreditNote (params) -> {r4.status_code}: {r4.text[:300]}")
-    if r4.status_code in (200, 201):
-        return
-
-    # Try 2: date in JSON body
-    r5 = requests.put(url, auth=tx_auth(token), json={"date": date}, timeout=30)
-    print(f"PUT createCreditNote (body) -> {r5.status_code}: {r5.text[:300]}")
-    if r5.status_code in (200, 201):
-        return
-
-    # Try 3: no body, no params — let server use invoice date
-    r6 = requests.put(url, auth=tx_auth(token), timeout=30)
-    print(f"PUT createCreditNote (no body) -> {r6.status_code}: {r6.text[:300]}")
+    r4 = requests.put(
+        url,
+        auth=tx_auth(token),
+        params={"date": date},
+        timeout=30
+    )
+    print(f"PUT /:createCreditNote -> {r4.status_code}: {r4.text[:300]}")
 
 
 def do_update_customer(base_url: str, token: str, payload: dict) -> None:

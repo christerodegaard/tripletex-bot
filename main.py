@@ -119,7 +119,8 @@ create_department
 
 create_ledger_posting
   payload: { "description": string, "date": "YYYY-MM-DD",
-             "debitAccount": "NNNN", "creditAccount": "NNNN", "amount": number }
+             "debitAccount": "NNNN", "creditAccount": "NNNN", "amount": number,
+             "departmentId"?: number, "departmentName"?: string }
 
 create_travel_expense
   payload: { "description": string, "date": "YYYY-MM-DD", "amount": number,
@@ -168,6 +169,9 @@ register_supplier_invoice
   payload: { "supplierName": string, "organizationNumber"?: string,
              "invoiceNumber"?: string, "amount": number, "vatPercent"?: number,
              "accountCode"?: string, "date": "YYYY-MM-DD" }
+
+create_accounting_dimension
+  payload: { "name": string, "values": ["string"] }
 
 no_op
   payload: { "reason": string }
@@ -497,7 +501,37 @@ def do_create_ledger_posting(base_url: str, token: str, payload: dict) -> None:
             }
         ]
     }
+    if payload.get("departmentName"):
+        r_dept = tx_get(base_url, token, "/department",
+                       {"name": payload["departmentName"], "count": 1})
+        if r_dept.status_code == 200:
+            depts = r_dept.json().get("values", [])
+            if depts:
+                dept_ref = {"id": depts[0]["id"]}
+                for posting in body["postings"]:
+                    posting["department"] = dept_ref
+    elif payload.get("departmentId") is not None:
+        try:
+            dept_ref = {"id": int(payload["departmentId"])}
+        except (TypeError, ValueError):
+            dept_ref = None
+        if dept_ref:
+            for posting in body["postings"]:
+                posting["department"] = dept_ref
     tx_post(base_url, token, "/ledger/voucher", body)
+
+
+def do_create_accounting_dimension(base_url: str, token: str, payload: dict) -> None:
+    """Create a department/dimension and its values."""
+    name = payload.get("name", "Dimension")
+    values = payload.get("values", [])
+
+    r = tx_post(base_url, token, "/department", {"name": name})
+    print(f"Create dimension {name} -> {r.status_code}")
+
+    for value in values:
+        r2 = tx_post(base_url, token, "/department", {"name": value})
+        print(f"Create dimension value {value} -> {r2.status_code}")
 
 
 def do_create_travel_expense(base_url: str, token: str, payload: dict) -> None:
@@ -844,6 +878,7 @@ ACTION_MAP = {
     "create_employee": do_create_employee,
     "create_project": do_create_project,
     "create_department": do_create_department,
+    "create_accounting_dimension": do_create_accounting_dimension,
     "create_invoice": do_create_invoice,
     "create_ledger_posting": do_create_ledger_posting,
     "create_travel_expense": do_create_travel_expense,

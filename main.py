@@ -78,7 +78,8 @@ create_invoice
 
 create_project
   payload: { "name": string, "projectManagerEmail"?: string,
-             "startDate"?: "YYYY-MM-DD", "endDate"?: "YYYY-MM-DD" }
+             "startDate"?: "YYYY-MM-DD", "endDate"?: "YYYY-MM-DD",
+             "customerName"?: string }
 
 create_department
   payload: { "name": string, "departmentNumber"?: string }
@@ -214,15 +215,22 @@ def do_create_employee(base_url: str, token: str, payload: dict) -> None:
         depts = dept_r.json().get("values", [])
         if depts:
             body["department"] = {"id": depts[0]["id"]}
-    tx_post(base_url, token, "/employee", body)
+    r = tx_post(base_url, token, "/employee", body)
+    if r.status_code == 422 and "finnes allerede" in r.text:
+        print("Employee email exists, looking up existing employee")
+        r2 = tx_get(base_url, token, "/employee", {"email": body["email"]})
+        if r2.status_code == 200:
+            employees = r2.json().get("values", [])
+            if employees:
+                print(f"Found existing employee id: {employees[0]['id']}")
 
 
 def do_create_project(base_url: str, token: str, payload: dict) -> None:
-    body = {"name": payload.get("name", "New Project")}
-    if payload.get("startDate"):
-        body["startDate"] = payload["startDate"]
-    if payload.get("endDate"):
-        body["endDate"] = payload["endDate"]
+    body = {
+        "name": payload.get("name", "New Project"),
+        "startDate": payload.get("startDate", "2025-03-20"),
+        "endDate": payload.get("endDate", "2026-03-20"),
+    }
     if payload.get("projectManagerEmail"):
         r = tx_get(base_url, token, "/employee",
                    {"email": payload["projectManagerEmail"]})
@@ -296,11 +304,24 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
         return
 
     # Step 3: invoice from order
-    tx_post(base_url, token, "/invoice", {
+    invoice_body = {
         "invoiceDate": invoice_date,
         "invoiceDueDate": due_date,
         "orders": [{"id": order_id}],
-    })
+    }
+    r_inv = tx_post(base_url, token, "/invoice", invoice_body)
+    if r_inv.status_code == 422 and "bankkontonummer" in r_inv.text:
+        print("Attempting to set company bank account number...")
+        # Try to find and update company settings
+        r_company = tx_get(base_url, token, "/company")
+        if r_company.status_code == 200:
+            company_id = r_company.json().get("value", {}).get("id")
+            if company_id:
+                tx_post(base_url, token, f"/company/{company_id}",
+                       {"bankAccountNumber": "15060126900"})
+                # Retry invoice
+                r_inv2 = tx_post(base_url, token, "/invoice", invoice_body)
+                print(f"Invoice retry -> {r_inv2.status_code}")
 
 
 def do_create_ledger_posting(base_url: str, token: str, payload: dict) -> None:

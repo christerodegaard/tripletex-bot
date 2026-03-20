@@ -382,7 +382,11 @@ def do_create_project(base_url: str, token: str, payload: dict) -> None:
             employees = r.json().get("values", [])
             if employees:
                 body["projectManager"] = {"id": employees[0]["id"]}
-    tx_post(base_url, token, "/project", body)
+    r = tx_post(base_url, token, "/project", body)
+    if r.status_code == 422 and "i bruk" in r.text:
+        print("Project name/number in use, retrying without number")
+        body.pop("number", None)
+        r = tx_post(base_url, token, "/project", body)
 
 
 def do_create_department(base_url: str, token: str, payload: dict) -> None:
@@ -442,26 +446,19 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
         print("No order ID returned")
         return
 
-    # Step 3: invoice from order - try different send types
-    for send_type in [None, "EMAIL", "EHF", "PAPER"]:
-        invoice_body = {
-            "invoiceDate": invoice_date,
-            "invoiceDueDate": due_date,
-            "customer": {"id": customer_id},
-            "orders": [{"id": order_id}],
-        }
-        if send_type:
-            invoice_body["sendType"] = send_type
-        r_inv = tx_post(base_url, token, "/invoice", invoice_body)
-        print(f"Invoice attempt (sendType={send_type}) -> {r_inv.status_code}: {r_inv.text[:200]}")
-        if r_inv.status_code in (200, 201):
-            print("Invoice created successfully!")
-            return
-        if "bankkontonummer" not in r_inv.text:
-            # Different error - no point retrying with different send type
-            break
-
-    print("All invoice attempts failed")
+    # Step 3: invoice from order
+    invoice_body = {
+        "invoiceDate": invoice_date,
+        "invoiceDueDate": due_date,
+        "customer": {"id": customer_id},
+        "orders": [{"id": order_id}],
+    }
+    r_inv = tx_post(base_url, token, "/invoice", invoice_body)
+    print(f"Invoice attempt -> {r_inv.status_code}: {r_inv.text[:200]}")
+    if r_inv.status_code in (200, 201):
+        print("Invoice created successfully!")
+    else:
+        print("Invoice failed")
 
 
 def do_create_ledger_posting(base_url: str, token: str, payload: dict) -> None:

@@ -728,22 +728,9 @@ def do_create_payroll(base_url: str, token: str, payload: dict) -> None:
     r2 = tx_post(base_url, token, "/salary/transaction", {
         "year": dt.year,
         "month": dt.month,
-        "payslips": [{
-            "employee": {"id": employee_id},
-            "salary": base_salary,
-        }]
+        "payslips": [{"employee": {"id": employee_id}, "salary": base_salary}],
     })
     print(f"salary/transaction -> {r2.status_code}: {r2.text[:200]}")
-    if r2.status_code not in (200, 201):
-        r2 = tx_post(base_url, token, "/salary/transaction", {
-            "year": dt.year,
-            "month": dt.month,
-            "payslips": [{
-                "employee": {"id": employee_id},
-                "amount": base_salary,
-            }],
-        })
-        print(f"salary/transaction (amount) -> {r2.status_code}: {r2.text[:200]}")
     if r2.status_code in (200, 201):
         return
 

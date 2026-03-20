@@ -1,5 +1,6 @@
 import json
 import re
+import time
 from typing import Any, List, Optional
 
 import anthropic
@@ -176,7 +177,7 @@ def do_create_employee(base_url: str, token: str, payload: dict) -> None:
             body[field] = payload[field]
     if not body.get("email"):
         safe_name = (first + "." + last).lower().replace(" ", "")
-        body["email"] = f"{safe_name}@example.com"
+        body["email"] = f"{safe_name}.{int(time.time())}@example.com"
     dept_r = tx_get(base_url, token, "/department", {"count": 1})
     if dept_r.status_code == 200:
         depts = dept_r.json().get("values", [])

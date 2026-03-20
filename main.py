@@ -399,7 +399,7 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
     invoice_date = payload.get("invoiceDate", "2025-03-20")
     due_date = payload.get("invoiceDueDate", "2025-04-20")
 
-    # Step 1: find or create customer
+    # Step 1: find or create customer — one GET /customer max; same customer_id for order + invoice
     r = tx_get(base_url, token, "/customer", {"name": customer_name, "count": 1})
     customer_id = None
     if r.status_code == 200:
@@ -926,4 +926,5 @@ def solve(body: SolveRequest) -> dict:
         return {"status": "completed"}
     for action in plan.get("actions", []):
         dispatch(base_url, token, action)
+    print(f"=== Solve complete: {len(plan.get('actions', []))} actions dispatched ===")
     return {"status": "completed"}

@@ -364,7 +364,8 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
         if customers:
             customer_id = customers[0]["id"]
     if customer_id is None:
-        r2 = tx_post(base_url, token, "/customer", {"name": customer_name})
+        r2 = tx_post(base_url, token, "/customer",
+                     {"name": customer_name, "isCustomer": True})
         if r2.status_code in (200, 201):
             customer_id = r2.json().get("value", {}).get("id")
     if customer_id is None:
@@ -393,29 +394,32 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
     }
     r3 = tx_post(base_url, token, "/order", order_body)
     if r3.status_code not in (200, 201):
-        print(f"Order creation failed ({r3.status_code}) - cannot create invoice")
+        print(f"Order creation failed ({r3.status_code})")
         return
     order_id = r3.json().get("value", {}).get("id")
     if not order_id:
-        print("No order ID returned - cannot create invoice")
+        print("No order ID returned")
         return
 
-    # Step 3: invoice from order
-    invoice_body = {
-        "invoiceDate": invoice_date,
-        "invoiceDueDate": due_date,
-        "orders": [{"id": order_id}],
-    }
-    r_inv = tx_post(base_url, token, "/invoice", invoice_body)
-    if r_inv.status_code == 422 and "bankkontonummer" in r_inv.text:
-        print("Trying invoice with EMAIL sendType...")
-        invoice_body_v2 = {**invoice_body, "sendType": "EMAIL"}
-        r_inv2 = tx_post(base_url, token, "/invoice", invoice_body_v2)
-        print(f"Invoice with EMAIL -> {r_inv2.status_code}: {r_inv2.text[:200]}")
-        if r_inv2.status_code not in (200, 201):
-            if set_bank_account(base_url, token):
-                r_inv3 = tx_post(base_url, token, "/invoice", invoice_body)
-                print(f"Invoice retry after bank set -> {r_inv3.status_code}")
+    # Step 3: invoice from order - try different send types
+    for send_type in [None, "EMAIL", "EHFT"]:
+        invoice_body = {
+            "invoiceDate": invoice_date,
+            "invoiceDueDate": due_date,
+            "orders": [{"id": order_id}],
+        }
+        if send_type:
+            invoice_body["sendType"] = send_type
+        r_inv = tx_post(base_url, token, "/invoice", invoice_body)
+        print(f"Invoice attempt (sendType={send_type}) -> {r_inv.status_code}: {r_inv.text[:200]}")
+        if r_inv.status_code in (200, 201):
+            print("Invoice created successfully!")
+            return
+        if "bankkontonummer" not in r_inv.text:
+            # Different error - no point retrying with different send type
+            break
+
+    print("All invoice attempts failed")
 
 
 def do_create_ledger_posting(base_url: str, token: str, payload: dict) -> None:

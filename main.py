@@ -555,13 +555,13 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
             make_posting(base_url, token, invoice_date, description, 1500, total_amount, row=1),
             make_posting(base_url, token, invoice_date, description, 3000, -total_amount, row=2),
         ]
+        if customer_id:
+            postings[0]["customer"] = {"id": customer_id}
         voucher_body = {
             "date": invoice_date,
             "description": description,
             "postings": postings,
         }
-        if customer_id:
-            voucher_body["postings"][0]["customer"] = {"id": customer_id}
         r_voucher = tx_post(base_url, token, "/ledger/voucher", voucher_body)
         print(f"Invoice fallback voucher -> {r_voucher.status_code}: {r_voucher.text[:300]}")
     else:
@@ -811,6 +811,7 @@ def do_register_payment(base_url: str, token: str, payload: dict) -> None:
         make_posting(base_url, token, date, description, 1920, use_amount, row=1),
         make_posting(base_url, token, date, description, 1500, -use_amount, row=2),
     ]
+    # Account 1500 is customer sub-ledger — requires customer reference
     if customer_id:
         postings[1]["customer"] = {"id": customer_id}
     voucher_body = {
@@ -876,19 +877,20 @@ def do_create_credit_note(base_url: str, token: str, payload: dict) -> None:
             make_posting(base_url, token, date, pd, 3000, invoice_amount, row=1),
             make_posting(base_url, token, date, pd, 1500, -invoice_amount, row=2),
         ]
+        cn_customer_id = customer_id
+        if not cn_customer_id and customer_name:
+            r_cust = tx_get(base_url, token, "/customer", {"name": customer_name, "count": 1})
+            if r_cust.status_code == 200:
+                custs = r_cust.json().get("values", [])
+                if custs:
+                    cn_customer_id = custs[0]["id"]
+        if cn_customer_id:
+            postings[1]["customer"] = {"id": cn_customer_id}
         voucher_body = {
             "date": date,
             "description": f"Kreditnota {customer_name_for_voucher} {date}",
             "postings": postings,
         }
-        if customer_id:
-            voucher_body["postings"][1]["customer"] = {"id": customer_id}
-        elif customer_name:
-            r_cust = tx_get(base_url, token, "/customer", {"name": customer_name, "count": 1})
-            if r_cust.status_code == 200:
-                custs = r_cust.json().get("values", [])
-                if custs:
-                    voucher_body["postings"][1]["customer"] = {"id": custs[0]["id"]}
         tx_post(base_url, token, "/ledger/voucher", voucher_body)
         return
 
@@ -1149,8 +1151,6 @@ def do_register_supplier_invoice(base_url: str, token: str, payload: dict) -> No
         if r2.status_code in (200, 201):
             supplier_id = r2.json().get("value", {}).get("id")
 
-    _ = supplier_id  # ensure supplier exists; not sent on voucher body
-
     # Create voucher with postings
     description = f"{invoice_number} - {supplier_name}" if invoice_number else supplier_name
     postings = [
@@ -1166,6 +1166,9 @@ def do_register_supplier_invoice(base_url: str, token: str, payload: dict) -> No
         ),
         make_posting(base_url, token, date, description, 2400, -amount_with_vat, row=3),
     ]
+    # Account 2400 is supplier sub-ledger — requires supplier reference
+    if supplier_id:
+        postings[2]["supplier"] = {"id": supplier_id}
     voucher_body = {
         "date": date,
         "description": description,

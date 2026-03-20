@@ -177,6 +177,9 @@ create_accounting_dimension
 create_payroll
   payload: { "employeeEmail": string, "baseSalary": number,
              "bonus"?: number, "date": "YYYY-MM-DD" }
+  Use this for ANY request to run payroll, process salary, pay wages, or add bonuses.
+  Extract the employee email, base salary amount, and any bonus amount.
+  Always use this action — never use no_op for payroll requests.
 
 no_op
   payload: { "reason": string }
@@ -187,6 +190,8 @@ Rules:
 - Extract names, dates, amounts from the prompt.
 - For dates, use today (2025-03-20) if not specified.
 - Return ONLY valid JSON, nothing else.
+- For payroll/salary/lønn/lønnskjøring requests, ALWAYS use create_payroll, never no_op.
+- For accounting dimension requests, ALWAYS use create_accounting_dimension, never no_op.
 """
 
 

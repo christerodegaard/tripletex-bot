@@ -55,7 +55,8 @@ Supported action types and their payloads:
 
 create_customer
   payload: { "name": string, "email"?: string, "phoneNumber"?: string,
-             "organizationNumber"?: string }
+             "organizationNumber"?: string, "address"?: string,
+             "postalCode"?: string, "city"?: string, "country"?: string }
 
 create_supplier
   payload: { "name": string, "email"?: string, "phoneNumber"?: string,
@@ -176,6 +177,18 @@ def do_create_customer(base_url: str, token: str, payload: dict) -> None:
     for field in ("email", "phoneNumber", "organizationNumber"):
         if payload.get(field):
             body[field] = payload[field]
+    # Build address if any address fields present
+    addr = {}
+    if payload.get("address"):
+        addr["addressLine1"] = payload["address"]
+    if payload.get("postalCode"):
+        addr["postalCode"] = payload["postalCode"]
+    if payload.get("city"):
+        addr["city"] = payload["city"]
+    if payload.get("country"):
+        addr["country"] = payload["country"]
+    if addr:
+        body["physicalAddress"] = addr
     tx_post(base_url, token, "/customer", body)
 
 
@@ -184,6 +197,18 @@ def do_create_supplier(base_url: str, token: str, payload: dict) -> None:
     for field in ("email", "phoneNumber", "organizationNumber"):
         if payload.get(field):
             body[field] = payload[field]
+    # Build address if any address fields present
+    addr = {}
+    if payload.get("address"):
+        addr["addressLine1"] = payload["address"]
+    if payload.get("postalCode"):
+        addr["postalCode"] = payload["postalCode"]
+    if payload.get("city"):
+        addr["city"] = payload["city"]
+    if payload.get("country"):
+        addr["country"] = payload["country"]
+    if addr:
+        body["physicalAddress"] = addr
     tx_post(base_url, token, "/customer", body)
 
 

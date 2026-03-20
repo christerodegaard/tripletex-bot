@@ -101,7 +101,7 @@ create_employee
   payload: { "firstName": string, "lastName": string, "email"?: string,
              "employeeNumber"?: string, "dateOfBirth"?: "YYYY-MM-DD",
              "startDate"?: "YYYY-MM-DD" }
-  Always extract dateOfBirth and startDate when mentioned in the prompt.
+  Always extract dateOfBirth (convert "21. January 1999" → "1999-01-21") and startDate when mentioned.
 
 create_invoice
   payload: { "customer_name": string, "invoiceDate": "YYYY-MM-DD",
@@ -458,16 +458,17 @@ def do_create_employee(base_url: str, token: str, payload: dict) -> None:
             if employees:
                 print(f"Found existing employee id: {employees[0]['id']}")
     if r.status_code in (200, 201) and payload.get("startDate"):
-        employee_id = r.json().get("value", {}).get("id")
-        if employee_id:
-            employment_body = {
-                "employee": {"id": employee_id},
-                "startDate": payload["startDate"],
-                "employmentType": "ORDINARY",
-                "remunerationType": "MONTHLY_WAGE",
-                "workingHoursScheme": "NOT_SHIFT",
-            }
-            r_emp = tx_post(base_url, token, "/employee/employment", employment_body)
+        emp_id = r.json().get("value", {}).get("id")
+        if emp_id:
+            r_emp = tx_post(
+                base_url,
+                token,
+                "/employee/employment",
+                {
+                    "employee": {"id": emp_id},
+                    "startDate": payload["startDate"],
+                },
+            )
             print(f"employment -> {r_emp.status_code}: {r_emp.text[:200]}")
 
 

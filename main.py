@@ -252,7 +252,9 @@ def set_bank_account(base_url: str, token: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def do_create_customer(base_url: str, token: str, payload: dict) -> None:
-    body = {"name": payload.get("name", "Unknown Customer"), "isCustomer": True}
+    body = {"name": payload.get("name", "Unknown Customer"),
+            "isCustomer": True,
+            "isSupplier": False}
     for field in ("email", "phoneNumber", "organizationNumber"):
         if payload.get(field):
             body[field] = payload[field]
@@ -272,7 +274,9 @@ def do_create_customer(base_url: str, token: str, payload: dict) -> None:
 
 
 def do_create_supplier(base_url: str, token: str, payload: dict) -> None:
-    body = {"name": payload.get("name", "Unknown Supplier"), "isSupplier": True}
+    body = {"name": payload.get("name", "Unknown Supplier"),
+            "isSupplier": True,
+            "isCustomer": False}
     for field in ("email", "phoneNumber", "organizationNumber"):
         if payload.get(field):
             body[field] = payload[field]

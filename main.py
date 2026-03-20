@@ -479,6 +479,48 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
     print(f"Invoice attempt -> {r_inv.status_code}: {r_inv.text[:200]}")
     if r_inv.status_code in (200, 201):
         print("Invoice created successfully!")
+    elif r_inv.status_code == 422 and "bankkontonummer" in r_inv.text:
+        print("Bank account missing - falling back to ledger voucher")
+
+        # Calculate total from order lines
+        total_amount = sum(
+            item.get("unitPriceExcludingVatCurrency", 0) * item.get("count", 1)
+            for item in raw_orders
+        )
+
+        # Look up a revenue account (3000-series)
+        revenue_account = 3000
+        r_acc = tx_get(base_url, token, "/ledger/account", {"from": 0, "count": 100})
+        if r_acc.status_code == 200:
+            accounts = r_acc.json().get("values", [])
+            revenue_accounts = [a for a in accounts if str(a.get("number", "")).startswith("3")]
+            if revenue_accounts:
+                revenue_account = revenue_accounts[0]["number"]
+                print(f"Using revenue account: {revenue_account}")
+
+        description = f"Faktura {customer_name} {invoice_date}"
+        voucher_body = {
+            "date": invoice_date,
+            "description": description,
+            "postings": [
+                {
+                    "date": invoice_date,
+                    "description": description,
+                    "account": {"number": 1500},
+                    "amount": total_amount,
+                    "amountCurrency": total_amount,
+                },
+                {
+                    "date": invoice_date,
+                    "description": description,
+                    "account": {"number": revenue_account},
+                    "amount": -total_amount,
+                    "amountCurrency": -total_amount,
+                }
+            ]
+        }
+        r_voucher = tx_post(base_url, token, "/ledger/voucher", voucher_body)
+        print(f"Invoice fallback voucher -> {r_voucher.status_code}: {r_voucher.text[:300]}")
     else:
         print("Invoice failed")
 
@@ -740,7 +782,29 @@ def do_create_credit_note(base_url: str, token: str, payload: dict) -> None:
                 invoice_id = invoices[0]["id"]
 
     if not invoice_id:
-        print("No invoice found for credit note")
+        print("No invoice found - creating credit voucher directly")
+        customer_name_for_voucher = customer_name or "Unknown"
+        voucher_body = {
+            "date": date,
+            "description": f"Kreditnota {customer_name_for_voucher} {date}",
+            "postings": [
+                {
+                    "date": date,
+                    "description": f"Kreditnota {customer_name_for_voucher}",
+                    "account": {"number": 3000},
+                    "amount": 1000,
+                    "amountCurrency": 1000,
+                },
+                {
+                    "date": date,
+                    "description": f"Kreditnota {customer_name_for_voucher}",
+                    "account": {"number": 1500},
+                    "amount": -1000,
+                    "amountCurrency": -1000,
+                }
+            ]
+        }
+        tx_post(base_url, token, "/ledger/voucher", voucher_body)
         return
 
     url = f"{base_url.rstrip('/')}/invoice/{invoice_id}/:createCreditNote"

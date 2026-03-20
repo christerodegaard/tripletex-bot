@@ -254,20 +254,27 @@ def tx_get(base_url: str, token: str, path: str, params: dict = None) -> request
     return r
 
 
-_account_id_cache: Dict[int, int] = {}
+_thread_local = threading.local()
+
+
+def _get_account_cache() -> Dict[int, int]:
+    if not hasattr(_thread_local, "account_id_cache"):
+        _thread_local.account_id_cache = {}
+    return _thread_local.account_id_cache
 
 
 def get_account_id(base_url: str, token: str, number: int) -> int:
     """Look up account ID by account number. Cache results."""
+    cache = _get_account_cache()
     n = int(number)
-    if n in _account_id_cache:
-        return _account_id_cache[n]
+    if n in cache:
+        return cache[n]
     r = tx_get(base_url, token, "/ledger/account", {"number": n, "count": 1})
     if r.status_code == 200:
         accounts = r.json().get("values", [])
         if accounts:
             account_id = accounts[0]["id"]
-            _account_id_cache[n] = account_id
+            cache[n] = account_id
             print(f"Account {n} -> id {account_id}")
             return account_id
     # Fallback: try searching with from/count
@@ -277,7 +284,7 @@ def get_account_id(base_url: str, token: str, number: int) -> int:
         for acc in accounts:
             acc_no = acc.get("number")
             if acc_no is not None and int(acc_no) == n:
-                _account_id_cache[n] = acc["id"]
+                cache[n] = acc["id"]
                 return acc["id"]
     print(f"WARNING: Could not find account ID for number {n}")
     return n  # fallback to number itself
@@ -564,27 +571,6 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
     if not raw_orders:
         raw_orders = [{"description": "Service",
                        "unitPriceExcludingVatCurrency": 0, "count": 1}]
-
-    direct_invoice = {
-        "invoiceDate": invoice_date,
-        "invoiceDueDate": due_date,
-        "customer": {"id": customer_id},
-        "invoiceLines": [
-            {
-                "description": item.get("description", "Item"),
-                "unitPriceExcludingVatCurrency": item.get(
-                    "unitPriceExcludingVatCurrency", 0
-                ),
-                "quantity": item.get("count", 1),
-            }
-            for item in raw_orders
-        ],
-    }
-    r_direct = tx_post(base_url, token, "/invoice", direct_invoice)
-    print(f"Direct invoice -> {r_direct.status_code}: {r_direct.text[:200]}")
-    if r_direct.status_code in (200, 201):
-        print("Direct invoice created!")
-        return
 
     # Step 2: create order
     order_lines = [
@@ -1419,8 +1405,6 @@ def test_interpret(body: dict) -> dict:
 def solve(body: SolveRequest) -> dict:
     base_url = body.tripletex_credentials.base_url
     token = body.tripletex_credentials.session_token
-    _account_id_cache.clear()
-    print(f"Cache cleared for new request")
     print(f"=== incoming prompt: {body.prompt!r} ===")
     try:
         user_content = []

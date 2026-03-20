@@ -560,11 +560,33 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
         print("Could not find or create customer for invoice - aborting")
         return
 
-    # Step 2: create order
     raw_orders = payload.get("orders") or []
     if not raw_orders:
         raw_orders = [{"description": "Service",
                        "unitPriceExcludingVatCurrency": 0, "count": 1}]
+
+    direct_invoice = {
+        "invoiceDate": invoice_date,
+        "invoiceDueDate": due_date,
+        "customer": {"id": customer_id},
+        "invoiceLines": [
+            {
+                "description": item.get("description", "Item"),
+                "unitPriceExcludingVatCurrency": item.get(
+                    "unitPriceExcludingVatCurrency", 0
+                ),
+                "quantity": item.get("count", 1),
+            }
+            for item in raw_orders
+        ],
+    }
+    r_direct = tx_post(base_url, token, "/invoice", direct_invoice)
+    print(f"Direct invoice -> {r_direct.status_code}: {r_direct.text[:200]}")
+    if r_direct.status_code in (200, 201):
+        print("Direct invoice created!")
+        return
+
+    # Step 2: create order
     order_lines = [
         {
             "description": item.get("description", "Item"),

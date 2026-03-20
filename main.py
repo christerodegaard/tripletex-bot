@@ -101,7 +101,7 @@ create_department
 
 create_ledger_posting
   payload: { "description": string, "date": "YYYY-MM-DD",
-             "debitAccount": string, "creditAccount": string, "amount": number }
+             "debitAccount": "NNNN", "creditAccount": "NNNN", "amount": number }
 
 create_travel_expense
   payload: { "description": string, "date": "YYYY-MM-DD", "amount": number,
@@ -437,12 +437,31 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
 
 
 def do_create_ledger_posting(base_url: str, token: str, payload: dict) -> None:
+    date = payload.get("date", "2025-03-20")
+    description = payload.get("description", "Manual posting")
+    amount = payload.get("amount", 0)
+    debit = payload.get("debitAccount", "1500")
+    credit = payload.get("creditAccount", "4000")
+
     body = {
-        "description": payload.get("description", "Manual posting"),
-        "date": payload.get("date", "2025-03-20"),
-        "debitAccount": {"number": payload.get("debitAccount", "1500")},
-        "creditAccount": {"number": payload.get("creditAccount", "4000")},
-        "amount": payload.get("amount", 0),
+        "date": date,
+        "description": description,
+        "postings": [
+            {
+                "date": date,
+                "description": description,
+                "account": {"number": int(debit)},
+                "amount": amount,
+                "amountCurrency": amount,
+            },
+            {
+                "date": date,
+                "description": description,
+                "account": {"number": int(credit)},
+                "amount": -amount,
+                "amountCurrency": -amount,
+            }
+        ]
     }
     tx_post(base_url, token, "/ledger/voucher", body)
 

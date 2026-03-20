@@ -133,7 +133,8 @@ register_payment
              "amount": number, "date": "YYYY-MM-DD" }
 
 create_credit_note
-  payload: { "customerName": string, "date": "YYYY-MM-DD" }
+  payload: { "customerName": string, "date": "YYYY-MM-DD", "amount"?: number }
+  Extract the invoice amount from the prompt if mentioned (e.g. "12000 NOK").
 
 update_customer
   payload: { "name": string, "email"?: string, "phoneNumber"?: string }
@@ -498,7 +499,7 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
                 revenue_account = revenue_accounts[0]["number"]
                 print(f"Using revenue account: {revenue_account}")
 
-        description = f"Faktura {customer_name} {invoice_date}"
+        description = f"Faktura {customer_name} {invoice_date} (ordre {order_id})"
         voucher_body = {
             "date": invoice_date,
             "description": description,
@@ -752,6 +753,7 @@ def do_create_credit_note(base_url: str, token: str, payload: dict) -> None:
     date = payload.get("date", "2025-03-20")
     customer_name = payload.get("customerName", "")
     invoice_id = payload.get("invoiceId")
+    invoice_amount = payload.get("amount", 0)
 
     if not invoice_id and customer_name:
         r = tx_get(base_url, token, "/customer", {"name": customer_name, "count": 1})
@@ -781,6 +783,17 @@ def do_create_credit_note(base_url: str, token: str, payload: dict) -> None:
             if invoices:
                 invoice_id = invoices[0]["id"]
 
+    if invoice_id and not invoice_amount:
+        r_inv = tx_get(base_url, token, f"/invoice/{invoice_id}")
+        if r_inv.status_code == 200:
+            inv_data = r_inv.json().get("value", {})
+            invoice_amount = (
+                inv_data.get("amount", 0)
+                or inv_data.get("amountCurrency", 0)
+                or inv_data.get("amountExcludingVat", 0)
+            )
+            print(f"Invoice amount from API: {invoice_amount}")
+
     if not invoice_id:
         print("No invoice found - creating credit voucher directly")
         customer_name_for_voucher = customer_name or "Unknown"
@@ -792,15 +805,15 @@ def do_create_credit_note(base_url: str, token: str, payload: dict) -> None:
                     "date": date,
                     "description": f"Kreditnota {customer_name_for_voucher}",
                     "account": {"number": 3000},
-                    "amount": 1000,
-                    "amountCurrency": 1000,
+                    "amount": invoice_amount,
+                    "amountCurrency": invoice_amount,
                 },
                 {
                     "date": date,
                     "description": f"Kreditnota {customer_name_for_voucher}",
                     "account": {"number": 1500},
-                    "amount": -1000,
-                    "amountCurrency": -1000,
+                    "amount": -invoice_amount,
+                    "amountCurrency": -invoice_amount,
                 }
             ]
         }

@@ -81,6 +81,17 @@ create_ledger_posting
   payload: { "description": string, "date": "YYYY-MM-DD",
              "debitAccount": string, "creditAccount": string, "amount": number }
 
+create_travel_expense
+  payload: { "description": string, "date": "YYYY-MM-DD", "amount": number,
+             "category"?: string }
+
+register_payment
+  payload: { "invoiceId"?: number, "amount": number, "date": "YYYY-MM-DD",
+             "paymentTypeId"?: number }
+
+create_credit_note
+  payload: { "invoiceId": number, "date": "YYYY-MM-DD" }
+
 no_op
   payload: { "reason": string }
 
@@ -283,6 +294,53 @@ def do_create_ledger_posting(base_url: str, token: str, payload: dict) -> None:
     tx_post(base_url, token, "/ledger/voucher", body)
 
 
+def do_create_travel_expense(base_url: str, token: str, payload: dict) -> None:
+    body = {
+        "description": payload.get("description", "Travel expense"),
+        "date": payload.get("date", "2025-03-20"),
+        "costType": {"id": 1},
+        "isCompleted": False,
+    }
+    if payload.get("amount") is not None:
+        body["amount"] = payload["amount"]
+    tx_post(base_url, token, "/travelExpense", body)
+
+
+def do_register_payment(base_url: str, token: str, payload: dict) -> None:
+    # Find the invoice if not given directly
+    invoice_id = payload.get("invoiceId")
+    amount = payload.get("amount", 0)
+    date = payload.get("date", "2025-03-20")
+    payment_type_id = payload.get("paymentTypeId", 1)
+    if not invoice_id:
+        r = tx_get(base_url, token, "/invoice", {"invoiceDateFrom": "2020-01-01",
+                                                   "invoiceDateTo": "2030-01-01",
+                                                   "count": 1})
+        if r.status_code == 200:
+            invoices = r.json().get("values", [])
+            if invoices:
+                invoice_id = invoices[0]["id"]
+    if not invoice_id:
+        print("No invoice found to register payment against")
+        return
+    tx_post(base_url, token, f"/invoice/{invoice_id}/:payment", {
+        "paymentDate": date,
+        "paymentTypeId": payment_type_id,
+        "paidAmount": amount,
+    })
+
+
+def do_create_credit_note(base_url: str, token: str, payload: dict) -> None:
+    invoice_id = payload.get("invoiceId")
+    date = payload.get("date", "2025-03-20")
+    if not invoice_id:
+        print("No invoiceId provided for credit note")
+        return
+    tx_post(base_url, token, f"/invoice/{invoice_id}/:createCreditNote", {
+        "date": date,
+    })
+
+
 # ---------------------------------------------------------------------------
 # Dispatcher
 # ---------------------------------------------------------------------------
@@ -296,6 +354,9 @@ ACTION_MAP = {
     "create_department": do_create_department,
     "create_invoice": do_create_invoice,
     "create_ledger_posting": do_create_ledger_posting,
+    "create_travel_expense": do_create_travel_expense,
+    "register_payment": do_register_payment,
+    "create_credit_note": do_create_credit_note,
 }
 
 

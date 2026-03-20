@@ -276,9 +276,11 @@ def make_posting(
     account_number: int,
     amount: float,
     department_id: Optional[int] = None,
+    row: int = 1,
 ) -> dict:
     account_id = get_account_id(base_url, token, account_number)
     posting = {
+        "row": row,
         "date": date,
         "description": description,
         "account": {"id": account_id},
@@ -432,8 +434,8 @@ def do_create_employee(base_url: str, token: str, payload: dict) -> None:
 def do_create_project(base_url: str, token: str, payload: dict) -> None:
     body = {
         "name": payload.get("name", "New Project"),
-        "startDate": payload.get("startDate", "2025-03-20"),
-        "endDate": payload.get("endDate", "2026-03-20"),
+        "startDate": payload.get("startDate", "2026-03-20"),
+        "endDate": payload.get("endDate", "2027-03-20"),
     }
     body["number"] = payload.get("number", "")
     if payload.get("projectManagerEmail"):
@@ -542,8 +544,8 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
 
         description = f"Faktura {customer_name} {invoice_date} (ordre {order_id})"
         postings = [
-            make_posting(base_url, token, invoice_date, description, 1500, total_amount),
-            make_posting(base_url, token, invoice_date, description, 3000, -total_amount),
+            make_posting(base_url, token, invoice_date, description, 1500, total_amount, row=1),
+            make_posting(base_url, token, invoice_date, description, 3000, -total_amount, row=2),
         ]
         voucher_body = {
             "date": invoice_date,
@@ -564,8 +566,8 @@ def do_create_ledger_posting(base_url: str, token: str, payload: dict) -> None:
     credit = payload.get("creditAccount", "4000")
 
     postings = [
-        make_posting(base_url, token, date, description, int(debit), amount),
-        make_posting(base_url, token, date, description, int(credit), -amount),
+        make_posting(base_url, token, date, description, int(debit), amount, row=1),
+        make_posting(base_url, token, date, description, int(credit), -amount, row=2),
     ]
     body = {
         "date": date,
@@ -617,8 +619,12 @@ def do_create_accounting_dimension(base_url: str, token: str, payload: dict) -> 
                     dim_date = "2026-03-20"
                     dim_desc = f"{name}/{values[-1]}"
                     postings = [
-                        make_posting(base_url, token, dim_date, dim_desc, 7300, 1000, value_dept_id),
-                        make_posting(base_url, token, dim_date, dim_desc, 2910, -1000, value_dept_id),
+                        make_posting(
+                            base_url, token, dim_date, dim_desc, 7300, 1000, value_dept_id, row=1
+                        ),
+                        make_posting(
+                            base_url, token, dim_date, dim_desc, 2910, -1000, value_dept_id, row=2
+                        ),
                     ]
                     voucher = {
                         "date": dim_date,
@@ -664,13 +670,13 @@ def do_create_payroll(base_url: str, token: str, payload: dict) -> None:
     # Fallback: manual ledger voucher on salary accounts
     description = f"Lønn {employee_name} {date[:7]}"
     postings = [
-        make_posting(base_url, token, date, description, 5000, base_salary),
-        make_posting(base_url, token, date, description, 2910, -base_salary),
+        make_posting(base_url, token, date, description, 5000, base_salary, row=1),
+        make_posting(base_url, token, date, description, 2910, -base_salary, row=2),
     ]
     if bonus:
         bonus_desc = f"Bonus {employee_name} {date[:7]}"
-        postings.append(make_posting(base_url, token, date, bonus_desc, 5000, bonus))
-        postings.append(make_posting(base_url, token, date, bonus_desc, 2910, -bonus))
+        postings.append(make_posting(base_url, token, date, bonus_desc, 5000, bonus, row=3))
+        postings.append(make_posting(base_url, token, date, bonus_desc, 2910, -bonus, row=4))
 
     voucher_body = {
         "date": date,
@@ -781,8 +787,8 @@ def do_register_payment(base_url: str, token: str, payload: dict) -> None:
     use_amount = invoice_amount if invoice_amount else amount
     description = f"Betaling {customer_name} {date}"
     postings = [
-        make_posting(base_url, token, date, description, 1920, use_amount),
-        make_posting(base_url, token, date, description, 1500, -use_amount),
+        make_posting(base_url, token, date, description, 1920, use_amount, row=1),
+        make_posting(base_url, token, date, description, 1500, -use_amount, row=2),
     ]
     voucher_body = {
         "date": date,
@@ -843,8 +849,8 @@ def do_create_credit_note(base_url: str, token: str, payload: dict) -> None:
         customer_name_for_voucher = customer_name or "Unknown"
         pd = f"Kreditnota {customer_name_for_voucher}"
         postings = [
-            make_posting(base_url, token, date, pd, 3000, invoice_amount),
-            make_posting(base_url, token, date, pd, 1500, -invoice_amount),
+            make_posting(base_url, token, date, pd, 3000, invoice_amount, row=1),
+            make_posting(base_url, token, date, pd, 1500, -invoice_amount, row=2),
         ]
         voucher_body = {
             "date": date,
@@ -864,8 +870,8 @@ def do_create_credit_note(base_url: str, token: str, payload: dict) -> None:
     cn_amount = invoice_amount if invoice_amount else 10000
     description = f"Kreditnota {customer_name} {date}"
     postings = [
-        make_posting(base_url, token, date, description, 3000, cn_amount),
-        make_posting(base_url, token, date, description, 1500, -cn_amount),
+        make_posting(base_url, token, date, description, 3000, cn_amount, row=1),
+        make_posting(base_url, token, date, description, 1500, -cn_amount, row=2),
     ]
     voucher_body = {
         "date": date,
@@ -1108,11 +1114,17 @@ def do_register_supplier_invoice(base_url: str, token: str, payload: dict) -> No
     # Create voucher with postings
     description = f"{invoice_number} - {supplier_name}" if invoice_number else supplier_name
     postings = [
-        make_posting(base_url, token, date, description, int(account_code), net_amount),
+        make_posting(base_url, token, date, description, int(account_code), net_amount, row=1),
         make_posting(
-            base_url, token, date, f"VAT {vat_percent}% - {description}", 2700, vat_amount
+            base_url,
+            token,
+            date,
+            f"VAT {vat_percent}% - {description}",
+            2700,
+            vat_amount,
+            row=2,
         ),
-        make_posting(base_url, token, date, description, 2400, -amount_with_vat),
+        make_posting(base_url, token, date, description, 2400, -amount_with_vat, row=3),
     ]
     voucher_body = {
         "date": date,

@@ -143,7 +143,7 @@ def do_create_customer(base_url: str, token: str, payload: dict) -> None:
 
 
 def do_create_supplier(base_url: str, token: str, payload: dict) -> None:
-    body = {"name": payload.get("name", "Unknown Supplier"), "supplier": True}
+    body = {"name": payload.get("name", "Unknown Supplier")}
     for field in ("email", "phoneNumber", "organizationNumber"):
         if payload.get(field):
             body[field] = payload[field]
@@ -251,6 +251,7 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
     order_body = {
         "customer": {"id": customer_id},
         "orderDate": invoice_date,
+        "deliveryDate": invoice_date,
         "orderLines": order_lines,
     }
     r3 = tx_post(base_url, token, "/order", order_body)

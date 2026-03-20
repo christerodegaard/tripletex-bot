@@ -99,7 +99,9 @@ create_product
 
 create_employee
   payload: { "firstName": string, "lastName": string, "email"?: string,
-             "employeeNumber"?: string }
+             "employeeNumber"?: string, "dateOfBirth"?: "YYYY-MM-DD",
+             "startDate"?: "YYYY-MM-DD" }
+  Always extract dateOfBirth and startDate when mentioned in the prompt.
 
 create_invoice
   payload: { "customer_name": string, "invoiceDate": "YYYY-MM-DD",
@@ -298,17 +300,25 @@ def make_posting(
 def lookup_vat_type_mva3(base_url: str, token: str) -> Optional[int]:
     """Resolve output VAT type id (mva-kode 3: Utgående avgift, høy sats)."""
     vat_type_id = None
-    r_vat = tx_get(base_url, token, "/ledger/vatType", {"count": 20})
+    r_vat = tx_get(base_url, token, "/ledger/vatType", {"count": 10})
     if r_vat.status_code == 200:
         vat_types = r_vat.json().get("values", [])
         for vt in vat_types:
-            name = vt.get("name", "").lower()
             number = str(vt.get("number", ""))
-            # Look for output VAT high rate (mva-kode 3: Utgående avgift, høy sats)
-            if number == "3" or ("utg" in name and "høy" in name):
+            name = vt.get("name", "").lower()
+            if number == "3" or ("utgående" in name and "høy" in name):
                 vat_type_id = vt["id"]
                 print(f"Output VAT type -> id {vat_type_id} ({vt.get('name')})")
                 break
+
+    if not vat_type_id:
+        r_vat2 = tx_get(base_url, token, "/ledger/vatType", {"count": 50})
+        if r_vat2.status_code == 200:
+            for vt in r_vat2.json().get("values", []):
+                name = vt.get("name", "").lower()
+                if "utgående" in name and "høy" in name:
+                    vat_type_id = vt["id"]
+                    break
     return vat_type_id
 
 
@@ -441,6 +451,8 @@ def do_create_employee(base_url: str, token: str, payload: dict) -> None:
     for field in ("email", "employeeNumber"):
         if payload.get(field):
             body[field] = payload[field]
+    if payload.get("dateOfBirth"):
+        body["dateOfBirth"] = payload["dateOfBirth"]
     if not body.get("email"):
         safe_name = (first + "." + last).lower().replace(" ", "")
         body["email"] = f"{safe_name}.{int(time.time())}@example.com"
@@ -457,6 +469,18 @@ def do_create_employee(base_url: str, token: str, payload: dict) -> None:
             employees = r2.json().get("values", [])
             if employees:
                 print(f"Found existing employee id: {employees[0]['id']}")
+    if r.status_code in (200, 201) and payload.get("startDate"):
+        employee_id = r.json().get("value", {}).get("id")
+        if employee_id:
+            employment_body = {
+                "employee": {"id": employee_id},
+                "startDate": payload["startDate"],
+                "employmentType": "ORDINARY",
+                "remunerationType": "MONTHLY_WAGE",
+                "workingHoursScheme": "NOT_SHIFT",
+            }
+            r_emp = tx_post(base_url, token, "/employee/employment", employment_body)
+            print(f"employment -> {r_emp.status_code}: {r_emp.text[:200]}")
 
 
 def do_create_project(base_url: str, token: str, payload: dict) -> None:

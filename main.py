@@ -549,39 +549,69 @@ def do_create_payroll(base_url: str, token: str, payload: dict) -> None:
 
     # Find employee
     employee_id = None
+    employee_name = "Employee"
     if employee_email:
         r = tx_get(base_url, token, "/employee", {"email": employee_email})
         if r.status_code == 200:
             employees = r.json().get("values", [])
             if employees:
                 employee_id = employees[0]["id"]
+                employee_name = employees[0].get("displayName", "Employee")
 
     if not employee_id:
         print("No employee found for payroll")
         return
 
-    # Create salary transaction
-    body = {
-        "employee": {"id": employee_id},
+    # Try salary/transaction with minimal body (no employee field — API rejects it)
+    r2 = tx_post(base_url, token, "/salary/transaction", {
         "date": date,
-        "amount": base_salary + bonus,
-        "description": f"Lønn {date[:7]}",
-    }
-    if bonus:
-        body["supplements"] = [
-            {"description": "Engangbonus", "amount": bonus}
-        ]
-    r2 = tx_post(base_url, token, "/salary/transaction", body)
-    print(f"Payroll -> {r2.status_code}: {r2.text[:200]}")
+        "payslips": [{"employee": {"id": employee_id}, "salary": base_salary}]
+    })
+    print(f"salary/transaction -> {r2.status_code}: {r2.text[:200]}")
+    if r2.status_code in (200, 201):
+        return
 
-    # If that fails, try salary/payslip
-    if r2.status_code not in (200, 201):
-        r3 = tx_post(base_url, token, "/salary/payslip", {
-            "employee": {"id": employee_id},
+    # Fallback: manual ledger voucher on salary accounts
+    description = f"Lønn {employee_name} {date[:7]}"
+    postings = [
+        {
             "date": date,
-            "amount": base_salary + bonus,
+            "description": description,
+            "account": {"number": 5000},
+            "amount": base_salary,
+            "amountCurrency": base_salary,
+        },
+        {
+            "date": date,
+            "description": description,
+            "account": {"number": 2910},
+            "amount": -base_salary,
+            "amountCurrency": -base_salary,
+        }
+    ]
+    if bonus:
+        postings.append({
+            "date": date,
+            "description": f"Bonus {employee_name} {date[:7]}",
+            "account": {"number": 5000},
+            "amount": bonus,
+            "amountCurrency": bonus,
         })
-        print(f"Payslip -> {r3.status_code}: {r3.text[:200]}")
+        postings.append({
+            "date": date,
+            "description": f"Bonus {employee_name} {date[:7]}",
+            "account": {"number": 2910},
+            "amount": -bonus,
+            "amountCurrency": -bonus,
+        })
+
+    voucher_body = {
+        "date": date,
+        "description": description,
+        "postings": postings
+    }
+    r3 = tx_post(base_url, token, "/ledger/voucher", voucher_body)
+    print(f"ledger/voucher payroll fallback -> {r3.status_code}: {r3.text[:200]}")
 
 
 def do_create_travel_expense(base_url: str, token: str, payload: dict) -> None:

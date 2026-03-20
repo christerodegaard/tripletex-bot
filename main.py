@@ -119,6 +119,20 @@ update_product
   payload: { "name": string, "priceExcludingVatCurrency"?: number,
              "priceIncludingVatCurrency"?: number, "costExcludingVatCurrency"?: number }
 
+create_contact
+  payload: { "firstName": string, "lastName": string, "email"?: string,
+             "phoneNumber"?: string, "customerId"?: number, "customerName"?: string }
+
+delete_customer
+  payload: { "name": string }
+
+delete_employee
+  payload: { "firstName": string, "lastName": string }
+
+create_product_with_price
+  payload: { "name": string, "priceExcludingVatCurrency": number,
+             "costExcludingVatCurrency"?: number, "number"?: string }
+
 no_op
   payload: { "reason": string }
 
@@ -596,6 +610,69 @@ def do_log_hours(base_url: str, token: str, payload: dict) -> None:
     tx_post(base_url, token, "/timesheet/entry", body)
 
 
+def do_create_contact(base_url: str, token: str, payload: dict) -> None:
+    body = {
+        "firstName": payload.get("firstName", "Unknown"),
+        "lastName": payload.get("lastName", "Contact"),
+    }
+    for field in ("email", "phoneNumber"):
+        if payload.get(field):
+            body[field] = payload[field]
+    if payload.get("customerName"):
+        r = tx_get(base_url, token, "/customer",
+                   {"name": payload["customerName"], "count": 1})
+        if r.status_code == 200:
+            customers = r.json().get("values", [])
+            if customers:
+                body["customer"] = {"id": customers[0]["id"]}
+    elif payload.get("customerId"):
+        body["customer"] = {"id": payload["customerId"]}
+    tx_post(base_url, token, "/contact", body)
+
+
+def do_delete_customer(base_url: str, token: str, payload: dict) -> None:
+    name = payload.get("name", "")
+    r = tx_get(base_url, token, "/customer", {"name": name, "count": 1})
+    if r.status_code != 200:
+        return
+    customers = r.json().get("values", [])
+    if not customers:
+        print(f"No customer found: {name}")
+        return
+    customer_id = customers[0]["id"]
+    url = f"{base_url.rstrip('/')}/customer/{customer_id}"
+    r2 = requests.delete(url, auth=tx_auth(token), timeout=30)
+    print(f"DELETE /customer/{customer_id} -> {r2.status_code}")
+
+
+def do_delete_employee(base_url: str, token: str, payload: dict) -> None:
+    first = payload.get("firstName", "")
+    last = payload.get("lastName", "")
+    r = tx_get(base_url, token, "/employee",
+               {"firstName": first, "lastName": last, "count": 1})
+    if r.status_code != 200:
+        return
+    employees = r.json().get("values", [])
+    if not employees:
+        print(f"No employee found: {first} {last}")
+        return
+    employee_id = employees[0]["id"]
+    url = f"{base_url.rstrip('/')}/employee/{employee_id}"
+    r2 = requests.delete(url, auth=tx_auth(token), timeout=30)
+    print(f"DELETE /employee/{employee_id} -> {r2.status_code}")
+
+
+def do_create_product_with_price(base_url: str, token: str, payload: dict) -> None:
+    body = {"name": payload.get("name", "Unknown Product")}
+    if payload.get("priceExcludingVatCurrency") is not None:
+        body["priceExcludingVatCurrency"] = payload["priceExcludingVatCurrency"]
+    if payload.get("costExcludingVatCurrency") is not None:
+        body["costExcludingVatCurrency"] = payload["costExcludingVatCurrency"]
+    if payload.get("number"):
+        body["number"] = payload["number"]
+    tx_post(base_url, token, "/product", body)
+
+
 # ---------------------------------------------------------------------------
 # Dispatcher
 # ---------------------------------------------------------------------------
@@ -617,6 +694,10 @@ ACTION_MAP = {
     "delete_travel_expense": do_delete_travel_expense,
     "update_employee": do_update_employee,
     "log_hours": do_log_hours,
+    "create_contact": do_create_contact,
+    "delete_customer": do_delete_customer,
+    "delete_employee": do_delete_employee,
+    "create_product_with_price": do_create_product_with_price,
 }
 
 

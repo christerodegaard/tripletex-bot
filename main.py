@@ -109,7 +109,9 @@ create_invoice
              "invoiceDueDate": "YYYY-MM-DD",
              "orders": [ { "description": string,
                            "unitPriceExcludingVatCurrency": number,
-                           "count": number } ] }
+                           "count": number, "vatRate"?: number } ] }
+  Extract vatRate per line when mentioned: 25 = high rate, 15 = food/reduced, 0 = exempt.
+  Maps to VAT types: 25 -> number 3, 15 -> 33, 0 -> no vatType on the line.
 
 create_project
   payload: { "name": string, "projectManagerEmail"?: string,
@@ -263,6 +265,30 @@ def _get_account_cache() -> Dict[int, int]:
     return _thread_local.account_id_cache
 
 
+def _get_vat_type_cache() -> Dict[str, Optional[int]]:
+    if not hasattr(_thread_local, "vat_type_id_cache"):
+        _thread_local.vat_type_id_cache = {}
+    return _thread_local.vat_type_id_cache
+
+
+def get_vat_type_id(base_url: str, token: str, number_str: str) -> Optional[int]:
+    cache = _get_vat_type_cache()
+    if number_str in cache:
+        return cache[number_str]
+    vat_type_id = None
+    r_vat = tx_get(base_url, token, "/ledger/vatType", {"count": 50})
+    if r_vat.status_code == 200:
+        for vt in r_vat.json().get("values", []):
+            if str(vt.get("number", "")) == number_str:
+                vat_type_id = vt["id"]
+                print(
+                    f"Found VAT type {number_str} -> id {vat_type_id} ({vt.get('name')})"
+                )
+                break
+    cache[number_str] = vat_type_id
+    return vat_type_id
+
+
 def get_account_id(base_url: str, token: str, number: int) -> int:
     """Look up account ID by account number. Cache results."""
     cache = _get_account_cache()
@@ -319,15 +345,7 @@ def make_posting(
 
 def lookup_vat_type_mva3(base_url: str, token: str) -> Optional[int]:
     """Resolve VAT type id for mva-kode 3 (Utgående avgift, høy sats) by exact number."""
-    vat_type_id = None
-    r_vat = tx_get(base_url, token, "/ledger/vatType", {"count": 50})
-    if r_vat.status_code == 200:
-        for vt in r_vat.json().get("values", []):
-            if str(vt.get("number", "")) == "3":
-                vat_type_id = vt["id"]
-                print(f"Found VAT type 3 -> id {vat_type_id} ({vt.get('name')})")
-                break
-    return vat_type_id
+    return get_vat_type_id(base_url, token, "3")
 
 
 def set_bank_account(base_url: str, token: str) -> bool:
@@ -611,30 +629,53 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
     elif r_inv.status_code == 422 and "bankkontonummer" in r_inv.text:
         print("Bank account missing - falling back to ledger voucher")
 
-        # Calculate total from order lines
-        total_amount = sum(
-            item.get("unitPriceExcludingVatCurrency", 0) * item.get("count", 1)
-            for item in raw_orders
-        )
-
         description = f"Faktura {customer_name} {invoice_date} (ordre {order_id})"
-        # Look up VAT type for account 3000 (requires mva-kode 3)
-        vat_type_id = lookup_vat_type_mva3(base_url, token)
-        postings = [
-            make_posting(base_url, token, invoice_date, description, 1500, total_amount, row=1),
-            make_posting(
+        postings = []
+        row = 1
+        for item in raw_orders:
+            unit = item.get("unitPriceExcludingVatCurrency", 0)
+            count = item.get("count", 1)
+            amount = unit * count
+            raw_vat = item.get("vatRate", 25)
+            if raw_vat is None:
+                vat_rate = 25
+            else:
+                vat_rate = int(round(float(raw_vat)))
+            if vat_rate not in (0, 15, 25):
+                vat_rate = 25
+
+            vat_type_id = None
+            if vat_rate == 25:
+                vat_type_id = get_vat_type_id(base_url, token, "3")
+            elif vat_rate == 15:
+                vat_type_id = get_vat_type_id(base_url, token, "33")
+
+            p_debit = make_posting(
+                base_url,
+                token,
+                invoice_date,
+                description,
+                1500,
+                amount,
+                row=row,
+            )
+            p_debit["customer"] = {"id": customer_id}
+            postings.append(p_debit)
+            row += 1
+
+            p_credit = make_posting(
                 base_url,
                 token,
                 invoice_date,
                 description,
                 3000,
-                -total_amount,
-                row=2,
+                -amount,
+                row=row,
                 vat_type_id=vat_type_id,
-            ),
-        ]
-        if customer_id:
-            postings[0]["customer"] = {"id": customer_id}
+            )
+            postings.append(p_credit)
+            row += 1
+
         voucher_body = {
             "date": invoice_date,
             "description": description,

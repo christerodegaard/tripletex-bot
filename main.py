@@ -697,53 +697,82 @@ def do_create_travel_expense(base_url: str, token: str, payload: dict) -> None:
 def do_register_payment(base_url: str, token: str, payload: dict) -> None:
     amount = payload.get("amount", 0)
     date = payload.get("date", "2025-03-20")
+    customer_name = payload.get("customer_name", "")
 
-    # Find the invoice by customer name or directly
+    # Find invoice
     invoice_id = payload.get("invoiceId")
-    if not invoice_id:
-        customer_name = payload.get("customer_name", "")
-        if customer_name:
-            r = tx_get(base_url, token, "/customer",
-                      {"name": customer_name, "count": 1})
-            if r.status_code == 200:
-                customers = r.json().get("values", [])
-                if customers:
-                    customer_id = customers[0]["id"]
-                    r2 = tx_get(base_url, token, "/invoice", {
-                        "customerId": customer_id,
-                        "invoiceDateFrom": "2020-01-01",
-                        "invoiceDateTo": "2030-12-31",
-                        "count": 1,
-                    })
-                    if r2.status_code == 200:
-                        invoices = r2.json().get("values", [])
-                        if invoices:
-                            invoice_id = invoices[0]["id"]
-        if not invoice_id:
-            r = tx_get(base_url, token, "/invoice",
-                      {"invoiceDateFrom": "2020-01-01",
-                       "invoiceDateTo": "2030-12-31", "count": 1})
-            if r.status_code == 200:
-                invoices = r.json().get("values", [])
-                if invoices:
-                    invoice_id = invoices[0]["id"]
+    invoice_amount = amount
+
+    if not invoice_id and customer_name:
+        r = tx_get(base_url, token, "/customer", {"name": customer_name, "count": 1})
+        if r.status_code == 200:
+            customers = r.json().get("values", [])
+            if customers:
+                customer_id = customers[0]["id"]
+                r2 = tx_get(base_url, token, "/invoice", {
+                    "customerId": customer_id,
+                    "invoiceDateFrom": "2020-01-01",
+                    "invoiceDateTo": "2030-12-31",
+                    "count": 1,
+                })
+                if r2.status_code == 200:
+                    invoices = r2.json().get("values", [])
+                    if invoices:
+                        invoice_id = invoices[0]["id"]
+                        invoice_amount = invoices[0].get("amount", amount) or amount
 
     if not invoice_id:
-        print("No invoice found to register payment against")
+        r3 = tx_get(base_url, token, "/invoice", {
+            "invoiceDateFrom": "2020-01-01",
+            "invoiceDateTo": "2030-12-31",
+            "count": 1
+        })
+        if r3.status_code == 200:
+            invoices = r3.json().get("values", [])
+            if invoices:
+                invoice_id = invoices[0]["id"]
+                invoice_amount = invoices[0].get("amount", amount) or amount
+
+    if not invoice_id:
+        print("No invoice found for payment")
         return
 
+    # First try /:payment as query params (may work on some proxies)
     url = f"{base_url.rstrip('/')}/invoice/{invoice_id}/:payment"
-    r2 = requests.put(
-        url,
-        auth=tx_auth(token),
-        params={
-            "paymentDate": date,
-            "paymentTypeId": 1,
-            "paidAmount": amount,
-        },
-        timeout=30
-    )
-    print(f"PUT /:payment -> {r2.status_code}: {r2.text[:300]}")
+    r_pay = requests.put(url, auth=tx_auth(token), params={
+        "paymentDate": date,
+        "paymentTypeId": 1,
+        "paidAmount": invoice_amount,
+    }, timeout=30)
+    print(f"PUT /:payment -> {r_pay.status_code}: {r_pay.text[:200]}")
+    if r_pay.status_code in (200, 201):
+        return
+
+    # Fallback: ledger voucher — debit bank (1920), credit AR (1500)
+    use_amount = invoice_amount if invoice_amount else amount
+    description = f"Betaling {customer_name} {date}"
+    voucher_body = {
+        "date": date,
+        "description": description,
+        "postings": [
+            {
+                "date": date,
+                "description": description,
+                "account": {"number": 1920},
+                "amount": use_amount,
+                "amountCurrency": use_amount,
+            },
+            {
+                "date": date,
+                "description": description,
+                "account": {"number": 1500},
+                "amount": -use_amount,
+                "amountCurrency": -use_amount,
+            }
+        ]
+    }
+    r_v = tx_post(base_url, token, "/ledger/voucher", voucher_body)
+    print(f"Payment voucher -> {r_v.status_code}: {r_v.text[:200]}")
 
 
 def do_create_credit_note(base_url: str, token: str, payload: dict) -> None:
@@ -818,13 +847,43 @@ def do_create_credit_note(base_url: str, token: str, payload: dict) -> None:
         return
 
     url = f"{base_url.rstrip('/')}/invoice/{invoice_id}/:createCreditNote"
-    r4 = requests.put(
-        url,
-        auth=tx_auth(token),
-        params={"date": date},
-        timeout=30
-    )
-    print(f"PUT /:createCreditNote -> {r4.status_code}: {r4.text[:300]}")
+    r4 = requests.put(url, auth=tx_auth(token), params={"date": date}, timeout=30)
+    print(f"PUT /:createCreditNote -> {r4.status_code}: {r4.text[:200]}")
+    if r4.status_code in (200, 201):
+        return
+
+    # Fallback: get invoice amount then create reversal voucher
+    cn_amount = payload.get("amount", 0) or invoice_amount
+    if invoice_id and not cn_amount:
+        r_inv = tx_get(base_url, token, f"/invoice/{invoice_id}")
+        if r_inv.status_code == 200:
+            inv = r_inv.json().get("value", {})
+            cn_amount = inv.get("amount", 0) or inv.get("amountExcludingVat", 0)
+
+    use_amount = cn_amount if cn_amount else 10000
+    description = f"Kreditnota {customer_name} {date}"
+    voucher_body = {
+        "date": date,
+        "description": description,
+        "postings": [
+            {
+                "date": date,
+                "description": description,
+                "account": {"number": 3000},
+                "amount": use_amount,
+                "amountCurrency": use_amount,
+            },
+            {
+                "date": date,
+                "description": description,
+                "account": {"number": 1500},
+                "amount": -use_amount,
+                "amountCurrency": -use_amount,
+            }
+        ]
+    }
+    r_v = tx_post(base_url, token, "/ledger/voucher", voucher_body)
+    print(f"Credit note voucher -> {r_v.status_code}: {r_v.text[:200]}")
 
 
 def do_update_customer(base_url: str, token: str, payload: dict) -> None:

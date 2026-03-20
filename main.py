@@ -169,6 +169,7 @@ def do_create_employee(base_url: str, token: str, payload: dict) -> None:
     body = {
         "firstName": first or "Unknown",
         "lastName": last or "Employee",
+        "userType": "STANDARD",
     }
     for field in ("email", "employeeNumber"):
         if payload.get(field):

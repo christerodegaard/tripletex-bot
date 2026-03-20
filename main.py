@@ -174,23 +174,28 @@ def tx_get(base_url: str, token: str, path: str, params: dict = None) -> request
 
 
 def set_bank_account(base_url: str, token: str) -> bool:
-    """Try to set company bank account number using companyWithLoginAccess."""
-    r = tx_get(base_url, token, "/companyWithLoginAccess")
-    if r.status_code == 200:
-        values = r.json().get("value", {})
-        if isinstance(values, list):
-            company = values[0] if values else {}
-        else:
-            company = values
-        company_id = company.get("id")
-        if company_id:
-            url = f"{base_url.rstrip('/')}/company/{company_id}"
-            r2 = requests.put(url, auth=tx_auth(token),
-                             json={"id": company_id, "bankAccountNumber": "15060126900"},
-                             timeout=30)
-            print(f"Set bank account -> {r2.status_code}: {r2.text[:200]}")
-            return r2.status_code in (200, 201)
-    print(f"companyWithLoginAccess -> {r.status_code}: {r.text[:200]}")
+    """Try multiple endpoints to find and set company bank account."""
+    # Try /token/employee first to get company context
+    for path in ["/companyWithLoginAccess", "/company/withLoginAccess",
+                 "/internaltransaction/company"]:
+        r = tx_get(base_url, token, path)
+        print(f"Trying {path} -> {r.status_code}")
+        if r.status_code == 200:
+            data = r.json()
+            value = data.get("value", data.get("values", [{}]))
+            if isinstance(value, list):
+                company = value[0] if value else {}
+            else:
+                company = value
+            company_id = company.get("id")
+            if company_id:
+                url = f"{base_url.rstrip('/')}/company/{company_id}"
+                r2 = requests.put(url, auth=tx_auth(token),
+                                 json={"id": company_id,
+                                       "bankAccountNumber": "15060126900"},
+                                 timeout=30)
+                print(f"Set bank account -> {r2.status_code}: {r2.text[:300]}")
+                return r2.status_code in (200, 201)
     return False
 
 
@@ -389,9 +394,14 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
     }
     r_inv = tx_post(base_url, token, "/invoice", invoice_body)
     if r_inv.status_code == 422 and "bankkontonummer" in r_inv.text:
-        if set_bank_account(base_url, token):
-            r_inv = tx_post(base_url, token, "/invoice", invoice_body)
-            print(f"Invoice retry -> {r_inv.status_code}")
+        print("Trying invoice with EMAIL sendType...")
+        invoice_body_v2 = {**invoice_body, "sendType": "EMAIL"}
+        r_inv2 = tx_post(base_url, token, "/invoice", invoice_body_v2)
+        print(f"Invoice with EMAIL -> {r_inv2.status_code}: {r_inv2.text[:200]}")
+        if r_inv2.status_code not in (200, 201):
+            if set_bank_account(base_url, token):
+                r_inv3 = tx_post(base_url, token, "/invoice", invoice_body)
+                print(f"Invoice retry after bank set -> {r_inv3.status_code}")
 
 
 def do_create_ledger_posting(base_url: str, token: str, payload: dict) -> None:

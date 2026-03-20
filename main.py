@@ -223,6 +223,21 @@ def tx_get(base_url: str, token: str, path: str, params: dict = None) -> request
     return r
 
 
+def debug_company_endpoints(base_url: str, token: str) -> None:
+    """Try all company endpoints to find which ones work."""
+    endpoints = [
+        "/company",
+        "/companyWithLoginAccess",
+        "/company/withLoginAccess",
+        "/token/employee",
+        "/employee/current",
+        "/employee/current/employmentId",
+    ]
+    for ep in endpoints:
+        r = tx_get(base_url, token, ep)
+        print(f"DEBUG {ep} -> {r.status_code}: {r.text[:150]}")
+
+
 def set_bank_account(base_url: str, token: str) -> bool:
     """Try multiple endpoints to find and set company bank account."""
     # Try /token/employee first to get company context
@@ -896,6 +911,7 @@ def solve(body: SolveRequest) -> dict:
     print(f"=== incoming prompt: {body.prompt!r} ===")
     base_url = body.tripletex_credentials.base_url
     token = body.tripletex_credentials.session_token
+    debug_company_endpoints(base_url, token)
     try:
         user_content = []
         for f in (body.files or []):

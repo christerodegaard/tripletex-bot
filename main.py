@@ -2,7 +2,7 @@ import json
 import re
 import threading
 import time
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import anthropic
 import requests
@@ -237,6 +237,57 @@ def tx_get(base_url: str, token: str, path: str, params: dict = None) -> request
     r = requests.get(url, auth=tx_auth(token), params=params, timeout=30)
     print(f"  -> {r.status_code}: {r.text[:300]}")
     return r
+
+
+_account_id_cache: Dict[int, int] = {}
+
+
+def get_account_id(base_url: str, token: str, number: int) -> int:
+    """Look up account ID by account number. Cache results."""
+    n = int(number)
+    if n in _account_id_cache:
+        return _account_id_cache[n]
+    r = tx_get(base_url, token, "/ledger/account", {"number": n, "count": 1})
+    if r.status_code == 200:
+        accounts = r.json().get("values", [])
+        if accounts:
+            account_id = accounts[0]["id"]
+            _account_id_cache[n] = account_id
+            print(f"Account {n} -> id {account_id}")
+            return account_id
+    # Fallback: try searching with from/count
+    r2 = tx_get(base_url, token, "/ledger/account", {"from": 0, "count": 1000})
+    if r2.status_code == 200:
+        accounts = r2.json().get("values", [])
+        for acc in accounts:
+            acc_no = acc.get("number")
+            if acc_no is not None and int(acc_no) == n:
+                _account_id_cache[n] = acc["id"]
+                return acc["id"]
+    print(f"WARNING: Could not find account ID for number {n}")
+    return n  # fallback to number itself
+
+
+def make_posting(
+    base_url: str,
+    token: str,
+    date: str,
+    description: str,
+    account_number: int,
+    amount: float,
+    department_id: Optional[int] = None,
+) -> dict:
+    account_id = get_account_id(base_url, token, account_number)
+    posting = {
+        "date": date,
+        "description": description,
+        "account": {"id": account_id},
+        "amount": amount,
+        "amountCurrency": amount,
+    }
+    if department_id is not None:
+        posting["department"] = {"id": department_id}
+    return posting
 
 
 def set_bank_account(base_url: str, token: str) -> bool:
@@ -490,25 +541,14 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
         )
 
         description = f"Faktura {customer_name} {invoice_date} (ordre {order_id})"
+        postings = [
+            make_posting(base_url, token, invoice_date, description, 1500, total_amount),
+            make_posting(base_url, token, invoice_date, description, 3000, -total_amount),
+        ]
         voucher_body = {
             "date": invoice_date,
             "description": description,
-            "postings": [
-                {
-                    "date": invoice_date,
-                    "description": description,
-                    "account": {"number": 1500},
-                    "amount": total_amount,
-                    "amountCurrency": total_amount,
-                },
-                {
-                    "date": invoice_date,
-                    "description": description,
-                    "account": {"number": 3000},
-                    "amount": -total_amount,
-                    "amountCurrency": -total_amount,
-                }
-            ]
+            "postings": postings,
         }
         r_voucher = tx_post(base_url, token, "/ledger/voucher", voucher_body)
         print(f"Invoice fallback voucher -> {r_voucher.status_code}: {r_voucher.text[:300]}")
@@ -523,25 +563,14 @@ def do_create_ledger_posting(base_url: str, token: str, payload: dict) -> None:
     debit = payload.get("debitAccount", "1500")
     credit = payload.get("creditAccount", "4000")
 
+    postings = [
+        make_posting(base_url, token, date, description, int(debit), amount),
+        make_posting(base_url, token, date, description, int(credit), -amount),
+    ]
     body = {
         "date": date,
         "description": description,
-        "postings": [
-            {
-                "date": date,
-                "description": description,
-                "account": {"number": int(debit)},
-                "amount": amount,
-                "amountCurrency": amount,
-            },
-            {
-                "date": date,
-                "description": description,
-                "account": {"number": int(credit)},
-                "amount": -amount,
-                "amountCurrency": -amount,
-            }
-        ]
+        "postings": postings,
     }
     if payload.get("departmentName"):
         r_dept = tx_get(base_url, token, "/department",
@@ -585,18 +614,16 @@ def do_create_accounting_dimension(base_url: str, token: str, payload: dict) -> 
                 depts = r_dept.json().get("values", [])
                 if depts:
                     value_dept_id = depts[0]["id"]
-                    # Create a sample posting linked to the dimension value
+                    dim_date = "2026-03-20"
+                    dim_desc = f"{name}/{values[-1]}"
+                    postings = [
+                        make_posting(base_url, token, dim_date, dim_desc, 7300, 1000, value_dept_id),
+                        make_posting(base_url, token, dim_date, dim_desc, 2910, -1000, value_dept_id),
+                    ]
                     voucher = {
-                        "date": "2026-03-20",
+                        "date": dim_date,
                         "description": f"Dimensjon {name} - {values[-1]}",
-                        "postings": [
-                            {"date": "2026-03-20", "description": f"{name}/{values[-1]}",
-                             "account": {"number": 7300}, "amount": 1000, "amountCurrency": 1000,
-                             "department": {"id": value_dept_id}},
-                            {"date": "2026-03-20", "description": f"{name}/{values[-1]}",
-                             "account": {"number": 2910}, "amount": -1000, "amountCurrency": -1000,
-                             "department": {"id": value_dept_id}}
-                        ]
+                        "postings": postings,
                     }
                     tx_post(base_url, token, "/ledger/voucher", voucher)
 
@@ -637,36 +664,13 @@ def do_create_payroll(base_url: str, token: str, payload: dict) -> None:
     # Fallback: manual ledger voucher on salary accounts
     description = f"Lønn {employee_name} {date[:7]}"
     postings = [
-        {
-            "date": date,
-            "description": description,
-            "account": {"number": 5000},
-            "amount": base_salary,
-            "amountCurrency": base_salary,
-        },
-        {
-            "date": date,
-            "description": description,
-            "account": {"number": 2910},
-            "amount": -base_salary,
-            "amountCurrency": -base_salary,
-        }
+        make_posting(base_url, token, date, description, 5000, base_salary),
+        make_posting(base_url, token, date, description, 2910, -base_salary),
     ]
     if bonus:
-        postings.append({
-            "date": date,
-            "description": f"Bonus {employee_name} {date[:7]}",
-            "account": {"number": 5000},
-            "amount": bonus,
-            "amountCurrency": bonus,
-        })
-        postings.append({
-            "date": date,
-            "description": f"Bonus {employee_name} {date[:7]}",
-            "account": {"number": 2910},
-            "amount": -bonus,
-            "amountCurrency": -bonus,
-        })
+        bonus_desc = f"Bonus {employee_name} {date[:7]}"
+        postings.append(make_posting(base_url, token, date, bonus_desc, 5000, bonus))
+        postings.append(make_posting(base_url, token, date, bonus_desc, 2910, -bonus))
 
     voucher_body = {
         "date": date,
@@ -776,25 +780,14 @@ def do_register_payment(base_url: str, token: str, payload: dict) -> None:
     # Fallback: ledger voucher — debit bank (1920), credit AR (1500)
     use_amount = invoice_amount if invoice_amount else amount
     description = f"Betaling {customer_name} {date}"
+    postings = [
+        make_posting(base_url, token, date, description, 1920, use_amount),
+        make_posting(base_url, token, date, description, 1500, -use_amount),
+    ]
     voucher_body = {
         "date": date,
         "description": description,
-        "postings": [
-            {
-                "date": date,
-                "description": description,
-                "account": {"number": 1920},
-                "amount": use_amount,
-                "amountCurrency": use_amount,
-            },
-            {
-                "date": date,
-                "description": description,
-                "account": {"number": 1500},
-                "amount": -use_amount,
-                "amountCurrency": -use_amount,
-            }
-        ]
+        "postings": postings,
     }
     r_v = tx_post(base_url, token, "/ledger/voucher", voucher_body)
     print(f"Payment voucher -> {r_v.status_code}: {r_v.text[:200]}")
@@ -848,25 +841,15 @@ def do_create_credit_note(base_url: str, token: str, payload: dict) -> None:
     if not invoice_id:
         print("No invoice found - creating credit voucher directly")
         customer_name_for_voucher = customer_name or "Unknown"
+        pd = f"Kreditnota {customer_name_for_voucher}"
+        postings = [
+            make_posting(base_url, token, date, pd, 3000, invoice_amount),
+            make_posting(base_url, token, date, pd, 1500, -invoice_amount),
+        ]
         voucher_body = {
             "date": date,
             "description": f"Kreditnota {customer_name_for_voucher} {date}",
-            "postings": [
-                {
-                    "date": date,
-                    "description": f"Kreditnota {customer_name_for_voucher}",
-                    "account": {"number": 3000},
-                    "amount": invoice_amount,
-                    "amountCurrency": invoice_amount,
-                },
-                {
-                    "date": date,
-                    "description": f"Kreditnota {customer_name_for_voucher}",
-                    "account": {"number": 1500},
-                    "amount": -invoice_amount,
-                    "amountCurrency": -invoice_amount,
-                }
-            ]
+            "postings": postings,
         }
         tx_post(base_url, token, "/ledger/voucher", voucher_body)
         return
@@ -880,25 +863,14 @@ def do_create_credit_note(base_url: str, token: str, payload: dict) -> None:
     # /:createCreditNote blocked or failed — fall back to reversal voucher
     cn_amount = invoice_amount if invoice_amount else 10000
     description = f"Kreditnota {customer_name} {date}"
+    postings = [
+        make_posting(base_url, token, date, description, 3000, cn_amount),
+        make_posting(base_url, token, date, description, 1500, -cn_amount),
+    ]
     voucher_body = {
         "date": date,
         "description": description,
-        "postings": [
-            {
-                "date": date,
-                "description": description,
-                "account": {"number": 3000},
-                "amount": cn_amount,
-                "amountCurrency": cn_amount,
-            },
-            {
-                "date": date,
-                "description": description,
-                "account": {"number": 1500},
-                "amount": -cn_amount,
-                "amountCurrency": -cn_amount,
-            }
-        ]
+        "postings": postings,
     }
     r_v = tx_post(base_url, token, "/ledger/voucher", voucher_body)
     print(f"Credit note voucher -> {r_v.status_code}: {r_v.text[:200]}")
@@ -994,8 +966,8 @@ def do_log_hours(base_url: str, token: str, payload: dict) -> None:
         r_proj = tx_get(base_url, token, f"/project/{project_id}")
         if r_proj.status_code == 200:
             proj = r_proj.json().get("value", {})
-            proj_start = proj.get("startDate", date)
-            proj_end = proj.get("endDate", "2099-12-31")
+            proj_start = proj.get("startDate") or date
+            proj_end = proj.get("endDate") or "2099-12-31"
             # Use project start date if our date is before it
             if date < proj_start:
                 date = proj_start
@@ -1135,32 +1107,17 @@ def do_register_supplier_invoice(base_url: str, token: str, payload: dict) -> No
 
     # Create voucher with postings
     description = f"{invoice_number} - {supplier_name}" if invoice_number else supplier_name
+    postings = [
+        make_posting(base_url, token, date, description, int(account_code), net_amount),
+        make_posting(
+            base_url, token, date, f"VAT {vat_percent}% - {description}", 2700, vat_amount
+        ),
+        make_posting(base_url, token, date, description, 2400, -amount_with_vat),
+    ]
     voucher_body = {
         "date": date,
         "description": description,
-        "postings": [
-            {
-                "date": date,
-                "description": description,
-                "account": {"number": int(account_code)},
-                "amount": net_amount,
-                "amountCurrency": net_amount,
-            },
-            {
-                "date": date,
-                "description": f"VAT {vat_percent}% - {description}",
-                "account": {"number": 2700},
-                "amount": vat_amount,
-                "amountCurrency": vat_amount,
-            },
-            {
-                "date": date,
-                "description": description,
-                "account": {"number": 2400},
-                "amount": -amount_with_vat,
-                "amountCurrency": -amount_with_vat,
-            }
-        ]
+        "postings": postings,
     }
     tx_post(base_url, token, "/ledger/voucher", voucher_body)
 

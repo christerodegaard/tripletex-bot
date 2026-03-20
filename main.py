@@ -1,7 +1,7 @@
 import json
 import re
 import time
-from typing import Any, List, Optional
+from typing import List, Optional
 
 import anthropic
 import requests
@@ -20,9 +20,15 @@ class TripletexCredentials(BaseModel):
     session_token: str
 
 
+class FileAttachment(BaseModel):
+    filename: str
+    content_base64: str
+    mime_type: str
+
+
 class SolveRequest(BaseModel):
     prompt: str
-    files: Optional[List[Any]] = None
+    files: Optional[List[FileAttachment]] = None
     tripletex_credentials: TripletexCredentials
 
 
@@ -115,12 +121,16 @@ Rules:
 
 
 def ask_claude(prompt: str) -> dict:
+    return ask_claude_with_content([{"type": "text", "text": prompt}])
+
+
+def ask_claude_with_content(content: list) -> dict:
     client = anthropic.Anthropic()
     message = client.messages.create(
         model="claude-sonnet-4-20250514",
         max_tokens=1024,
         system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": prompt}],
+        messages=[{"role": "user", "content": content}],
     )
     raw = message.content[0].text.strip()
     raw = re.sub(r"^```[a-z]*\n?", "", raw)
@@ -480,7 +490,31 @@ def solve(body: SolveRequest) -> dict:
     base_url = body.tripletex_credentials.base_url
     token = body.tripletex_credentials.session_token
     try:
-        plan = ask_claude(body.prompt)
+        user_content = []
+        for f in (body.files or []):
+            try:
+                if f.mime_type == "application/pdf":
+                    user_content.append({
+                        "type": "document",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "application/pdf",
+                            "data": f.content_base64,
+                        }
+                    })
+                elif f.mime_type.startswith("image/"):
+                    user_content.append({
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": f.mime_type,
+                            "data": f.content_base64,
+                        }
+                    })
+            except Exception as e:
+                print(f"Error processing file {f.filename}: {e}")
+        user_content.append({"type": "text", "text": body.prompt})
+        plan = ask_claude_with_content(user_content)
         print(f"Claude plan: {json.dumps(plan)}")
     except Exception as e:
         print(f"Claude error: {e} - falling back to no_op")

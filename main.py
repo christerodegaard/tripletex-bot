@@ -188,10 +188,9 @@ register_supplier_invoice
              "accountCode"?: string, "date": "YYYY-MM-DD" }
 
 create_accounting_dimension
-  payload: { "name": string, "values": ["string"],
-             "description"?: string, "date"?: "YYYY-MM-DD",
-             "debitAccount"?: "NNNN", "creditAccount"?: "NNNN", "amount"?: number }
-  When the task also needs ledger postings, extract description, date, debitAccount, creditAccount, and amount for the companion create_ledger_posting action, and use the dimension value name as departmentName on create_ledger_posting.
+  payload: { "name": string, "values": ["string"] }
+  Creates a dimension (department) and its values as sub-departments.
+  ALWAYS follow with a separate create_ledger_posting action for any required posting.
 
 create_payroll
   payload: { "employeeEmail": string, "baseSalary": number,
@@ -752,44 +751,6 @@ def do_create_accounting_dimension(base_url: str, token: str, payload: dict) -> 
     for value in values:
         r2 = tx_post(base_url, token, "/department", {"name": value})
         print(f"Create dimension value {value} -> {r2.status_code}")
-
-    # Also create a ledger voucher linking the dimension to account postings
-    if r.status_code in (200, 201):
-        dept_id = r.json().get("value", {}).get("id")
-        if dept_id and values:
-            # Find the created value department
-            r_dept = tx_get(base_url, token, "/department", {"name": values[-1], "count": 1})
-            if r_dept.status_code == 200:
-                depts = r_dept.json().get("values", [])
-                if depts:
-                    value_dept_id = depts[0]["id"]
-                    dim_date = "2026-03-20"
-                    dim_desc = f"{name}/{values[-1]}"
-                    postings = [
-                        make_posting(
-                            base_url, token, dim_date, dim_desc, 7300, 1000, value_dept_id, row=1
-                        ),
-                        make_posting(
-                            base_url, token, dim_date, dim_desc, 2910, -1000, value_dept_id, row=2
-                        ),
-                    ]
-                    voucher = {
-                        "date": dim_date,
-                        "description": f"Dimensjon {name} - {values[-1]}",
-                        "postings": postings,
-                    }
-                    r_emp = tx_get(base_url, token, "/employee", {"count": 1})
-                    emp_id = None
-                    if r_emp.status_code == 200:
-                        emps = r_emp.json().get("values", [])
-                        if emps:
-                            emp_id = emps[0]["id"]
-
-                    for posting in voucher["postings"]:
-                        if emp_id:
-                            posting["employee"] = {"id": emp_id}
-
-                    tx_post(base_url, token, "/ledger/voucher", voucher)
 
 
 def do_create_payroll(base_url: str, token: str, payload: dict) -> None:

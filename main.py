@@ -224,29 +224,26 @@ def tx_get(base_url: str, token: str, path: str, params: dict = None) -> request
 
 
 def set_bank_account(base_url: str, token: str) -> bool:
-    """Set company bank account by trying PUT /company with known IDs."""
-    # Try GET /employee/current to get company context
-    r = tx_get(base_url, token, "/employee/current")
-    if r.status_code == 200:
-        data = r.json().get("value", {})
-        company_id = None
-        # Try to extract company ID from employee data
-        if data.get("company"):
-            company_id = data["company"].get("id")
-        if not company_id:
-            # Try /employee/current/employmentId or similar
-            dept = data.get("department", {})
-            if dept:
-                company_id = dept.get("company", {}).get("id")
-        if company_id:
-            url = f"{base_url.rstrip('/')}/company/{company_id}"
-            r2 = requests.put(url, auth=tx_auth(token),
-                             json={"id": company_id,
-                                   "bankAccountNumber": "15060126900"},
-                             timeout=30)
-            print(f"set_bank_account PUT -> {r2.status_code}: {r2.text[:200]}")
-            return r2.status_code in (200, 201)
-    print(f"set_bank_account: employee/current -> {r.status_code}")
+    # Try employee/current to get company ID
+    for path in ["/employee/current", "/employee/current/employmentId"]:
+        r = tx_get(base_url, token, path)
+        print(f"set_bank_account {path} -> {r.status_code}: {r.text[:150]}")
+        if r.status_code == 200:
+            data = r.json().get("value", {})
+            # Try different paths to company ID
+            company_id = None
+            if isinstance(data, dict):
+                company_id = (data.get("company", {}) or {}).get("id")
+                if not company_id:
+                    company_id = (data.get("department", {}) or {}).get("company", {}).get("id") if data.get("department") else None
+            if company_id:
+                for put_path in [f"/company/{company_id}", f"/settings/company"]:
+                    put_url = f"{base_url.rstrip('/')}{put_path}"
+                    payload = {"id": company_id, "bankAccountNumber": "15060126900"}
+                    r2 = requests.put(put_url, auth=tx_auth(token), json=payload, timeout=30)
+                    print(f"PUT {put_path} -> {r2.status_code}: {r2.text[:150]}")
+                    if r2.status_code in (200, 201):
+                        return True
     return False
 
 

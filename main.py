@@ -92,6 +92,16 @@ register_payment
 create_credit_note
   payload: { "invoiceId": number, "date": "YYYY-MM-DD" }
 
+update_customer
+  payload: { "name": string, "email"?: string, "phoneNumber"?: string }
+
+delete_travel_expense
+  payload: { "id"?: number, "description"?: string }
+
+update_employee
+  payload: { "firstName": string, "lastName": string, "email"?: string,
+             "phoneNumber"?: string }
+
 no_op
   payload: { "reason": string }
 
@@ -147,7 +157,7 @@ def tx_get(base_url: str, token: str, path: str, params: dict = None) -> request
 # ---------------------------------------------------------------------------
 
 def do_create_customer(base_url: str, token: str, payload: dict) -> None:
-    body = {"name": payload.get("name", "Unknown Customer")}
+    body = {"name": payload.get("name", "Unknown Customer"), "isCustomer": True}
     for field in ("email", "phoneNumber", "organizationNumber"):
         if payload.get(field):
             body[field] = payload[field]
@@ -155,7 +165,7 @@ def do_create_customer(base_url: str, token: str, payload: dict) -> None:
 
 
 def do_create_supplier(base_url: str, token: str, payload: dict) -> None:
-    body = {"name": payload.get("name", "Unknown Supplier")}
+    body = {"name": payload.get("name", "Unknown Supplier"), "isSupplier": True}
     for field in ("email", "phoneNumber", "organizationNumber"):
         if payload.get(field):
             body[field] = payload[field]
@@ -341,6 +351,68 @@ def do_create_credit_note(base_url: str, token: str, payload: dict) -> None:
     })
 
 
+def do_update_customer(base_url: str, token: str, payload: dict) -> None:
+    name = payload.get("name", "")
+    r = tx_get(base_url, token, "/customer", {"name": name, "count": 1})
+    if r.status_code != 200:
+        print("Could not find customer to update")
+        return
+    customers = r.json().get("values", [])
+    if not customers:
+        print(f"No customer found with name: {name}")
+        return
+    customer_id = customers[0]["id"]
+    update_body = {}
+    for field in ("email", "phoneNumber", "organizationNumber"):
+        if payload.get(field):
+            update_body[field] = payload[field]
+    if not update_body:
+        print("No fields to update")
+        return
+    url = f"{base_url.rstrip('/')}/customer/{customer_id}"
+    r2 = requests.put(url, auth=tx_auth(token), json=update_body, timeout=30)
+    print(f"PUT /customer/{customer_id} -> {r2.status_code}: {r2.text[:200]}")
+
+
+def do_delete_travel_expense(base_url: str, token: str, payload: dict) -> None:
+    expense_id = payload.get("id")
+    if not expense_id:
+        r = tx_get(base_url, token, "/travelExpense", {"count": 1})
+        if r.status_code == 200:
+            expenses = r.json().get("values", [])
+            if expenses:
+                expense_id = expenses[0]["id"]
+    if not expense_id:
+        print("No travel expense found to delete")
+        return
+    url = f"{base_url.rstrip('/')}/travelExpense/{expense_id}"
+    r2 = requests.delete(url, auth=tx_auth(token), timeout=30)
+    print(f"DELETE /travelExpense/{expense_id} -> {r2.status_code}")
+
+
+def do_update_employee(base_url: str, token: str, payload: dict) -> None:
+    first = payload.get("firstName", "")
+    last = payload.get("lastName", "")
+    r = tx_get(base_url, token, "/employee",
+               {"firstName": first, "lastName": last, "count": 1})
+    if r.status_code != 200:
+        return
+    employees = r.json().get("values", [])
+    if not employees:
+        print(f"No employee found: {first} {last}")
+        return
+    employee_id = employees[0]["id"]
+    update_body = {}
+    for field in ("email", "phoneNumber"):
+        if payload.get(field):
+            update_body[field] = payload[field]
+    if not update_body:
+        return
+    url = f"{base_url.rstrip('/')}/employee/{employee_id}"
+    r2 = requests.put(url, auth=tx_auth(token), json=update_body, timeout=30)
+    print(f"PUT /employee/{employee_id} -> {r2.status_code}: {r2.text[:200]}")
+
+
 # ---------------------------------------------------------------------------
 # Dispatcher
 # ---------------------------------------------------------------------------
@@ -357,6 +429,9 @@ ACTION_MAP = {
     "create_travel_expense": do_create_travel_expense,
     "register_payment": do_register_payment,
     "create_credit_note": do_create_credit_note,
+    "update_customer": do_update_customer,
+    "delete_travel_expense": do_delete_travel_expense,
+    "update_employee": do_update_employee,
 }
 
 

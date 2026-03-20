@@ -173,6 +173,10 @@ register_supplier_invoice
 create_accounting_dimension
   payload: { "name": string, "values": ["string"] }
 
+create_payroll
+  payload: { "employeeEmail": string, "baseSalary": number,
+             "bonus"?: number, "date": "YYYY-MM-DD" }
+
 no_op
   payload: { "reason": string }
 
@@ -534,6 +538,49 @@ def do_create_accounting_dimension(base_url: str, token: str, payload: dict) -> 
         print(f"Create dimension value {value} -> {r2.status_code}")
 
 
+def do_create_payroll(base_url: str, token: str, payload: dict) -> None:
+    employee_email = payload.get("employeeEmail", "")
+    base_salary = payload.get("baseSalary", 0)
+    bonus = payload.get("bonus", 0)
+    date = payload.get("date", "2025-03-20")
+
+    # Find employee
+    employee_id = None
+    if employee_email:
+        r = tx_get(base_url, token, "/employee", {"email": employee_email})
+        if r.status_code == 200:
+            employees = r.json().get("values", [])
+            if employees:
+                employee_id = employees[0]["id"]
+
+    if not employee_id:
+        print("No employee found for payroll")
+        return
+
+    # Create salary transaction
+    body = {
+        "employee": {"id": employee_id},
+        "date": date,
+        "amount": base_salary + bonus,
+        "description": f"Lønn {date[:7]}",
+    }
+    if bonus:
+        body["supplements"] = [
+            {"description": "Engangbonus", "amount": bonus}
+        ]
+    r2 = tx_post(base_url, token, "/salary/transaction", body)
+    print(f"Payroll -> {r2.status_code}: {r2.text[:200]}")
+
+    # If that fails, try salary/payslip
+    if r2.status_code not in (200, 201):
+        r3 = tx_post(base_url, token, "/salary/payslip", {
+            "employee": {"id": employee_id},
+            "date": date,
+            "amount": base_salary + bonus,
+        })
+        print(f"Payslip -> {r3.status_code}: {r3.text[:200]}")
+
+
 def do_create_travel_expense(base_url: str, token: str, payload: dict) -> None:
     # Find employee to attach expense to
     r_emp = tx_get(base_url, token, "/employee", {"count": 1})
@@ -879,6 +926,7 @@ ACTION_MAP = {
     "create_project": do_create_project,
     "create_department": do_create_department,
     "create_accounting_dimension": do_create_accounting_dimension,
+    "create_payroll": do_create_payroll,
     "create_invoice": do_create_invoice,
     "create_ledger_posting": do_create_ledger_posting,
     "create_travel_expense": do_create_travel_expense,

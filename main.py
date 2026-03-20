@@ -489,15 +489,9 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
             for item in raw_orders
         )
 
-        # Look up a revenue account (3000-series)
-        revenue_account = 3000
-        r_acc = tx_get(base_url, token, "/ledger/account", {"from": 0, "count": 100})
-        if r_acc.status_code == 200:
-            accounts = r_acc.json().get("values", [])
-            revenue_accounts = [a for a in accounts if str(a.get("number", "")).startswith("3")]
-            if revenue_accounts:
-                revenue_account = revenue_accounts[0]["number"]
-                print(f"Using revenue account: {revenue_account}")
+        # Use standard Norwegian accounts - don't look up dynamically as results vary
+        revenue_account = 3000  # Salgsinntekter
+        ar_account = 1500       # Kundefordringer
 
         description = f"Faktura {customer_name} {invoice_date} (ordre {order_id})"
         voucher_body = {
@@ -507,7 +501,7 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
                 {
                     "date": invoice_date,
                     "description": description,
-                    "account": {"number": 1500},
+                    "account": {"number": ar_account},
                     "amount": total_amount,
                     "amountCurrency": total_amount,
                 },
@@ -958,6 +952,21 @@ def do_log_hours(base_url: str, token: str, payload: dict) -> None:
             projects = r.json().get("values", [])
             if projects:
                 project_id = projects[0]["id"]
+
+    if project_id:
+        r_proj = tx_get(base_url, token, f"/project/{project_id}")
+        if r_proj.status_code == 200:
+            proj = r_proj.json().get("value", {})
+            proj_start = proj.get("startDate", date)
+            proj_end = proj.get("endDate", "2099-12-31")
+            # Use project start date if our date is before it
+            if date < proj_start:
+                date = proj_start
+                print(f"Adjusted timesheet date to project start: {date}")
+            # Use project end date if our date is after it
+            elif date > proj_end:
+                date = proj_end
+                print(f"Adjusted timesheet date to project end: {date}")
 
     # Find or use default activity
     activity_id = None

@@ -712,8 +712,22 @@ def do_create_credit_note(base_url: str, token: str, payload: dict) -> None:
         return
 
     url = f"{base_url.rstrip('/')}/invoice/{invoice_id}/:createCreditNote"
-    r4 = requests.put(url, auth=tx_auth(token), params={"date": date}, json={}, timeout=30)
-    print(f"PUT /invoice/{invoice_id}/:createCreditNote -> {r4.status_code}: {r4.text[:200]}")
+
+    # Try 1: date as query param with no body
+    r4 = requests.put(url, auth=tx_auth(token), params={"date": date}, timeout=30)
+    print(f"PUT createCreditNote (params) -> {r4.status_code}: {r4.text[:300]}")
+    if r4.status_code in (200, 201):
+        return
+
+    # Try 2: date in JSON body
+    r5 = requests.put(url, auth=tx_auth(token), json={"date": date}, timeout=30)
+    print(f"PUT createCreditNote (body) -> {r5.status_code}: {r5.text[:300]}")
+    if r5.status_code in (200, 201):
+        return
+
+    # Try 3: no body, no params — let server use invoice date
+    r6 = requests.put(url, auth=tx_auth(token), timeout=30)
+    print(f"PUT createCreditNote (no body) -> {r6.status_code}: {r6.text[:300]}")
 
 
 def do_update_customer(base_url: str, token: str, payload: dict) -> None:

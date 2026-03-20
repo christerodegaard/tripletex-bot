@@ -37,6 +37,19 @@ class SolveRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 SYSTEM_PROMPT = """You are an accounting assistant that translates natural-language
+
+Note: Prompts may come in Norwegian. Key Norwegian terms:
+- ansatt/medarbeider = employee
+- kunde = customer
+- leverandør = supplier
+- faktura = invoice
+- produkt = product
+- avdeling = department
+- prosjekt = project
+- reiseregning = travel expense
+- betaling = payment
+- kreditnota = credit note
+
 instructions into Tripletex API actions.
 
 Given a user prompt, respond ONLY with a JSON object (no markdown, no explanation).
@@ -95,8 +108,8 @@ create_travel_expense
              "category"?: string }
 
 register_payment
-  payload: { "invoiceId"?: number, "amount": number, "date": "YYYY-MM-DD",
-             "paymentTypeId"?: number }
+  payload: { "customer_name"?: string, "invoiceId"?: number,
+             "amount": number, "date": "YYYY-MM-DD" }
 
 create_credit_note
   payload: { "invoiceId": number, "date": "YYYY-MM-DD" }
@@ -406,6 +419,7 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
         invoice_body = {
             "invoiceDate": invoice_date,
             "invoiceDueDate": due_date,
+            "customer": {"id": customer_id},
             "orders": [{"id": order_id}],
         }
         if send_type:
@@ -461,27 +475,44 @@ def do_create_travel_expense(base_url: str, token: str, payload: dict) -> None:
 
 
 def do_register_payment(base_url: str, token: str, payload: dict) -> None:
-    # Find the invoice if not given directly
-    invoice_id = payload.get("invoiceId")
     amount = payload.get("amount", 0)
     date = payload.get("date", "2025-03-20")
-    payment_type_id = payload.get("paymentTypeId", 1)
+
+    # Find the invoice by customer name or directly
+    invoice_id = payload.get("invoiceId")
     if not invoice_id:
-        r = tx_get(base_url, token, "/invoice", {"invoiceDateFrom": "2020-01-01",
-                                                   "invoiceDateTo": "2030-01-01",
-                                                   "count": 1})
-        if r.status_code == 200:
-            invoices = r.json().get("values", [])
-            if invoices:
-                invoice_id = invoices[0]["id"]
+        customer_name = payload.get("customer_name", "")
+        if customer_name:
+            r = tx_get(base_url, token, "/customer",
+                      {"name": customer_name, "count": 1})
+            if r.status_code == 200:
+                customers = r.json().get("values", [])
+                if customers:
+                    customer_id = customers[0]["id"]
+                    r2 = tx_get(base_url, token, "/invoice",
+                               {"customerId": customer_id, "count": 1})
+                    if r2.status_code == 200:
+                        invoices = r2.json().get("values", [])
+                        if invoices:
+                            invoice_id = invoices[0]["id"]
+        if not invoice_id:
+            r = tx_get(base_url, token, "/invoice",
+                      {"invoiceDateFrom": "2020-01-01",
+                       "invoiceDateTo": "2030-12-31", "count": 1})
+            if r.status_code == 200:
+                invoices = r.json().get("values", [])
+                if invoices:
+                    invoice_id = invoices[0]["id"]
+
     if not invoice_id:
         print("No invoice found to register payment against")
         return
-    tx_post(base_url, token, f"/invoice/{invoice_id}/:payment", {
+
+    payment_body = {
         "paymentDate": date,
-        "paymentTypeId": payment_type_id,
         "paidAmount": amount,
-    })
+    }
+    tx_post(base_url, token, f"/invoice/{invoice_id}/:payment", payment_body)
 
 
 def do_create_credit_note(base_url: str, token: str, payload: dict) -> None:

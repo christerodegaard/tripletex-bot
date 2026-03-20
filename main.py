@@ -134,6 +134,14 @@ create_travel_expense
 register_payment
   payload: { "customer_name"?: string, "invoiceId"?: number,
              "amount": number, "date": "YYYY-MM-DD" }
+  Incoming payments. For reversals, prefer reverse_payment with a positive
+  amount, or use a negative amount here to trigger automated reversal.
+
+reverse_payment
+  payload: { "customer_name"?: string, "invoiceId"?: number,
+             "amount": number, "date": "YYYY-MM-DD" }
+  Bank reversals and returned payments. Same fields as register_payment; use
+  the original positive payment amount — reversal logic runs in the backend.
 
 create_credit_note
   payload: { "customerName": string, "date": "YYYY-MM-DD", "amount"?: number }
@@ -856,6 +864,54 @@ def do_register_payment(base_url: str, token: str, payload: dict) -> None:
         print("No invoice found for payment")
         return
 
+    use_amount = invoice_amount if invoice_amount else amount
+    description = f"Betaling {customer_name} {date}"
+
+    if use_amount < 0 or amount < 0:
+        r_vouchers = tx_get(
+            base_url,
+            token,
+            "/ledger/voucher",
+            {
+                "dateFrom": "2020-01-01",
+                "dateTo": "2030-12-31",
+                "count": 10,
+            },
+        )
+        if r_vouchers.status_code == 200:
+            vouchers = r_vouchers.json().get("values", [])
+            for voucher in vouchers:
+                vid = voucher.get("id")
+                if vid:
+                    rev_url = f"{base_url.rstrip('/')}/ledger/voucher/{vid}/:reverse"
+                    r_rev = requests.put(
+                        rev_url,
+                        auth=tx_auth(token),
+                        params={"date": date},
+                        timeout=30,
+                    )
+                    print(
+                        f"Reverse voucher {vid} -> {r_rev.status_code}: "
+                        f"{r_rev.text[:200]}"
+                    )
+                    if r_rev.status_code in (200, 201):
+                        return
+        use_amount = abs(use_amount)
+        postings = [
+            make_posting(base_url, token, date, description, 1500, use_amount, row=1),
+            make_posting(base_url, token, date, description, 1920, -use_amount, row=2),
+        ]
+        if customer_id:
+            postings[0]["customer"] = {"id": customer_id}
+        voucher_body = {
+            "date": date,
+            "description": f"Reversering {description}",
+            "postings": postings,
+        }
+        r_v = tx_post(base_url, token, "/ledger/voucher", voucher_body)
+        print(f"Reversal voucher -> {r_v.status_code}: {r_v.text[:200]}")
+        return
+
     # First try /:payment as query params (may work on some proxies)
     url = f"{base_url.rstrip('/')}/invoice/{invoice_id}/:payment"
     r_pay = requests.put(url, auth=tx_auth(token), params={
@@ -868,8 +924,6 @@ def do_register_payment(base_url: str, token: str, payload: dict) -> None:
         return
 
     # Fallback: ledger voucher — debit bank (1920), credit AR (1500)
-    use_amount = invoice_amount if invoice_amount else amount
-    description = f"Betaling {customer_name} {date}"
     postings = [
         make_posting(base_url, token, date, description, 1920, use_amount, row=1),
         make_posting(base_url, token, date, description, 1500, -use_amount, row=2),
@@ -884,6 +938,13 @@ def do_register_payment(base_url: str, token: str, payload: dict) -> None:
     }
     r_v = tx_post(base_url, token, "/ledger/voucher", voucher_body)
     print(f"Payment voucher -> {r_v.status_code}: {r_v.text[:200]}")
+
+
+def do_reverse_payment(base_url: str, token: str, payload: dict) -> None:
+    p = dict(payload)
+    amt = p.get("amount", 0)
+    p["amount"] = -abs(amt) if amt else -1
+    do_register_payment(base_url, token, p)
 
 
 def do_create_credit_note(base_url: str, token: str, payload: dict) -> None:
@@ -1265,6 +1326,7 @@ ACTION_MAP = {
     "create_ledger_posting": do_create_ledger_posting,
     "create_travel_expense": do_create_travel_expense,
     "register_payment": do_register_payment,
+    "reverse_payment": do_reverse_payment,
     "create_credit_note": do_create_credit_note,
     "update_customer": do_update_customer,
     "delete_travel_expense": do_delete_travel_expense,

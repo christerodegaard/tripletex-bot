@@ -146,6 +146,11 @@ create_product_with_price
   payload: { "name": string, "priceExcludingVatCurrency": number,
              "costExcludingVatCurrency"?: number, "number"?: string }
 
+register_supplier_invoice
+  payload: { "supplierName": string, "organizationNumber"?: string,
+             "invoiceNumber"?: string, "amount": number, "vatPercent"?: number,
+             "accountCode"?: string, "date": "YYYY-MM-DD" }
+
 no_op
   payload: { "reason": string }
 
@@ -727,6 +732,70 @@ def do_create_product_with_price(base_url: str, token: str, payload: dict) -> No
     tx_post(base_url, token, "/product", body)
 
 
+def do_register_supplier_invoice(base_url: str, token: str, payload: dict) -> None:
+    supplier_name = payload.get("supplierName", "Unknown Supplier")
+    date = payload.get("date", "2025-03-20")
+    amount_with_vat = payload.get("amount", 0)
+    vat_percent = payload.get("vatPercent", 25)
+    account_code = payload.get("accountCode", "6340")
+    invoice_number = payload.get("invoiceNumber", "")
+
+    # Calculate amounts
+    vat_factor = vat_percent / (100 + vat_percent)
+    vat_amount = round(amount_with_vat * vat_factor, 2)
+    net_amount = round(amount_with_vat - vat_amount, 2)
+
+    # Find or create supplier
+    r = tx_get(base_url, token, "/customer",
+               {"name": supplier_name, "count": 1})
+    supplier_id = None
+    if r.status_code == 200:
+        suppliers = r.json().get("values", [])
+        if suppliers:
+            supplier_id = suppliers[0]["id"]
+    if not supplier_id:
+        org_no = payload.get("organizationNumber", "")
+        body = {"name": supplier_name, "isSupplier": True}
+        if org_no:
+            body["organizationNumber"] = org_no
+        r2 = tx_post(base_url, token, "/customer", body)
+        if r2.status_code in (200, 201):
+            supplier_id = r2.json().get("value", {}).get("id")
+
+    # Create voucher with postings
+    description = f"{invoice_number} - {supplier_name}" if invoice_number else supplier_name
+    voucher_body = {
+        "date": date,
+        "description": description,
+        "postings": [
+            {
+                "date": date,
+                "description": description,
+                "account": {"number": int(account_code)},
+                "amount": net_amount,
+                "amountCurrency": net_amount,
+            },
+            {
+                "date": date,
+                "description": f"VAT {vat_percent}% - {description}",
+                "account": {"number": 2700},
+                "amount": vat_amount,
+                "amountCurrency": vat_amount,
+            },
+            {
+                "date": date,
+                "description": description,
+                "account": {"number": 2400},
+                "amount": -amount_with_vat,
+                "amountCurrency": -amount_with_vat,
+            }
+        ]
+    }
+    if supplier_id:
+        voucher_body["supplier"] = {"id": supplier_id}
+    tx_post(base_url, token, "/ledger/voucher", voucher_body)
+
+
 # ---------------------------------------------------------------------------
 # Dispatcher
 # ---------------------------------------------------------------------------
@@ -752,6 +821,7 @@ ACTION_MAP = {
     "delete_customer": do_delete_customer,
     "delete_employee": do_delete_employee,
     "create_product_with_price": do_create_product_with_price,
+    "register_supplier_invoice": do_register_supplier_invoice,
 }
 
 

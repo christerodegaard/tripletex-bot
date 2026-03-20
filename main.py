@@ -667,7 +667,20 @@ def do_create_ledger_posting(base_url: str, token: str, payload: dict) -> None:
         if dept_ref:
             for posting in body["postings"]:
                 posting["department"] = dept_ref
-    tx_post(base_url, token, "/ledger/voucher", body)
+    r = tx_post(base_url, token, "/ledger/voucher", body)
+
+    # If employee sub-ledger required, add employee to expense postings
+    if r.status_code == 422 and "employee" in r.text.lower() and "mangler" in r.text:
+        print("Employee sub-ledger required, looking up first employee")
+        r_emp = tx_get(base_url, token, "/employee", {"count": 1})
+        if r_emp.status_code == 200:
+            emps = r_emp.json().get("values", [])
+            if emps:
+                emp_ref = {"id": emps[0]["id"]}
+                for posting in body["postings"]:
+                    posting["employee"] = emp_ref
+                r = tx_post(base_url, token, "/ledger/voucher", body)
+                print(f"Retry with employee -> {r.status_code}: {r.text[:200]}")
 
 
 def do_create_accounting_dimension(base_url: str, token: str, payload: dict) -> None:
@@ -707,6 +720,17 @@ def do_create_accounting_dimension(base_url: str, token: str, payload: dict) -> 
                         "description": f"Dimensjon {name} - {values[-1]}",
                         "postings": postings,
                     }
+                    r_emp = tx_get(base_url, token, "/employee", {"count": 1})
+                    emp_id = None
+                    if r_emp.status_code == 200:
+                        emps = r_emp.json().get("values", [])
+                        if emps:
+                            emp_id = emps[0]["id"]
+
+                    for posting in voucher["postings"]:
+                        if emp_id:
+                            posting["employee"] = {"id": emp_id}
+
                     tx_post(base_url, token, "/ledger/voucher", voucher)
 
 

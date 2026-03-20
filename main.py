@@ -131,7 +131,7 @@ register_payment
              "amount": number, "date": "YYYY-MM-DD" }
 
 create_credit_note
-  payload: { "invoiceId": number, "date": "YYYY-MM-DD" }
+  payload: { "invoiceId"?: number, "customerName"?: string, "date": "YYYY-MM-DD" }
 
 update_customer
   payload: { "name": string, "email"?: string, "phoneNumber"?: string }
@@ -659,12 +659,46 @@ def do_register_payment(base_url: str, token: str, payload: dict) -> None:
 def do_create_credit_note(base_url: str, token: str, payload: dict) -> None:
     invoice_id = payload.get("invoiceId")
     date = payload.get("date", "2025-03-20")
+    customer_name = payload.get("customerName", "")
+
+    # Find invoice if not given directly
+    if not invoice_id or invoice_id == 1:
+        if customer_name:
+            r = tx_get(base_url, token, "/customer",
+                      {"name": customer_name, "count": 1})
+            if r.status_code == 200:
+                customers = r.json().get("values", [])
+                if customers:
+                    customer_id = customers[0]["id"]
+                    r2 = tx_get(base_url, token, "/invoice", {
+                        "customerId": customer_id,
+                        "invoiceDateFrom": "2020-01-01",
+                        "invoiceDateTo": "2030-12-31",
+                        "count": 1
+                    })
+                    if r2.status_code == 200:
+                        invoices = r2.json().get("values", [])
+                        if invoices:
+                            invoice_id = invoices[0]["id"]
+        if not invoice_id or invoice_id == 1:
+            r3 = tx_get(base_url, token, "/invoice", {
+                "invoiceDateFrom": "2020-01-01",
+                "invoiceDateTo": "2030-12-31",
+                "count": 1
+            })
+            if r3.status_code == 200:
+                invoices = r3.json().get("values", [])
+                if invoices:
+                    invoice_id = invoices[0]["id"]
+
     if not invoice_id:
-        print("No invoiceId provided for credit note")
+        print("No invoice found for credit note")
         return
-    tx_post(base_url, token, f"/invoice/{invoice_id}/:createCreditNote", {
-        "date": date,
-    })
+
+    url = f"{base_url.rstrip('/')}/invoice/{invoice_id}/:createCreditNote"
+    r4 = requests.put(url, auth=tx_auth(token),
+                     json={"date": date}, timeout=30)
+    print(f"PUT /invoice/{invoice_id}/:createCreditNote -> {r4.status_code}: {r4.text[:200]}")
 
 
 def do_update_customer(base_url: str, token: str, payload: dict) -> None:

@@ -1322,6 +1322,7 @@ def solve(body: SolveRequest) -> dict:
     print(f"=== incoming prompt: {body.prompt!r} ===")
     base_url = body.tripletex_credentials.base_url
     token = body.tripletex_credentials.session_token
+    _account_id_cache.clear()
     try:
         user_content = []
         for f in (body.files or []):

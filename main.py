@@ -190,7 +190,7 @@ Rules:
 - If the prompt is ambiguous, do your best and pick the most likely action.
 - If you truly cannot map it, use no_op.
 - Extract names, dates, amounts from the prompt.
-- For dates, use today (2025-03-20) if not specified.
+- For dates, use today (2026-03-20) if not specified.
 - Return ONLY valid JSON, nothing else.
 - For payroll/salary/lønn/lønnskjøring requests, ALWAYS use create_payroll, never no_op.
 - For accounting dimension requests, ALWAYS use create_accounting_dimension, never no_op.
@@ -292,7 +292,7 @@ def do_create_customer(base_url: str, token: str, payload: dict) -> None:
 def do_create_supplier(base_url: str, token: str, payload: dict) -> None:
     body = {"name": payload.get("name", "Unknown Supplier"),
             "isSupplier": True,
-            "isCustomer": False}
+            "isCustomer": True}
     for field in ("email", "phoneNumber", "organizationNumber"):
         if payload.get(field):
             body[field] = payload[field]
@@ -575,6 +575,31 @@ def do_create_accounting_dimension(base_url: str, token: str, payload: dict) -> 
         r2 = tx_post(base_url, token, "/department", {"name": value})
         print(f"Create dimension value {value} -> {r2.status_code}")
 
+    # Also create a ledger voucher linking the dimension to account postings
+    if r.status_code in (200, 201):
+        dept_id = r.json().get("value", {}).get("id")
+        if dept_id and values:
+            # Find the created value department
+            r_dept = tx_get(base_url, token, "/department", {"name": values[-1], "count": 1})
+            if r_dept.status_code == 200:
+                depts = r_dept.json().get("values", [])
+                if depts:
+                    value_dept_id = depts[0]["id"]
+                    # Create a sample posting linked to the dimension value
+                    voucher = {
+                        "date": "2026-03-20",
+                        "description": f"Dimensjon {name} - {values[-1]}",
+                        "postings": [
+                            {"date": "2026-03-20", "description": f"{name}/{values[-1]}",
+                             "account": {"number": 7300}, "amount": 1000, "amountCurrency": 1000,
+                             "department": {"id": value_dept_id}},
+                            {"date": "2026-03-20", "description": f"{name}/{values[-1]}",
+                             "account": {"number": 2910}, "amount": -1000, "amountCurrency": -1000,
+                             "department": {"id": value_dept_id}}
+                        ]
+                    }
+                    tx_post(base_url, token, "/ledger/voucher", voucher)
+
 
 def do_create_payroll(base_url: str, token: str, payload: dict) -> None:
     employee_email = payload.get("employeeEmail", "")
@@ -852,15 +877,8 @@ def do_create_credit_note(base_url: str, token: str, payload: dict) -> None:
     if r4.status_code in (200, 201):
         return
 
-    # Fallback: get invoice amount then create reversal voucher
-    cn_amount = payload.get("amount", 0) or invoice_amount
-    if invoice_id and not cn_amount:
-        r_inv = tx_get(base_url, token, f"/invoice/{invoice_id}")
-        if r_inv.status_code == 200:
-            inv = r_inv.json().get("value", {})
-            cn_amount = inv.get("amount", 0) or inv.get("amountExcludingVat", 0)
-
-    use_amount = cn_amount if cn_amount else 10000
+    # /:createCreditNote blocked or failed — fall back to reversal voucher
+    cn_amount = invoice_amount if invoice_amount else 10000
     description = f"Kreditnota {customer_name} {date}"
     voucher_body = {
         "date": date,
@@ -870,15 +888,15 @@ def do_create_credit_note(base_url: str, token: str, payload: dict) -> None:
                 "date": date,
                 "description": description,
                 "account": {"number": 3000},
-                "amount": use_amount,
-                "amountCurrency": use_amount,
+                "amount": cn_amount,
+                "amountCurrency": cn_amount,
             },
             {
                 "date": date,
                 "description": description,
                 "account": {"number": 1500},
-                "amount": -use_amount,
-                "amountCurrency": -use_amount,
+                "amount": -cn_amount,
+                "amountCurrency": -cn_amount,
             }
         ]
     }

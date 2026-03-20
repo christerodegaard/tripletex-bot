@@ -277,6 +277,7 @@ def make_posting(
     amount: float,
     department_id: Optional[int] = None,
     row: int = 1,
+    vat_type_id: Optional[int] = None,
 ) -> dict:
     account_id = get_account_id(base_url, token, account_number)
     posting = {
@@ -289,7 +290,26 @@ def make_posting(
     }
     if department_id is not None:
         posting["department"] = {"id": department_id}
+    if vat_type_id is not None:
+        posting["vatType"] = {"id": vat_type_id}
     return posting
+
+
+def lookup_vat_type_mva3(base_url: str, token: str) -> Optional[int]:
+    """Resolve VAT type id for standard sales (mva-kode 3 / 25% / 'høy')."""
+    r_vat = tx_get(base_url, token, "/ledger/vatType", {"count": 10})
+    if r_vat.status_code == 200:
+        vat_types = r_vat.json().get("values", [])
+        for vt in vat_types:
+            if (
+                vt.get("number") == 3
+                or "høy" in vt.get("name", "").lower()
+                or vt.get("percentage") == 25
+            ):
+                vid = vt["id"]
+                print(f"VAT type 3 -> id {vid}")
+                return vid
+    return None
 
 
 def set_bank_account(base_url: str, token: str) -> bool:
@@ -551,9 +571,20 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
         )
 
         description = f"Faktura {customer_name} {invoice_date} (ordre {order_id})"
+        # Look up VAT type for account 3000 (requires mva-kode 3)
+        vat_type_id = lookup_vat_type_mva3(base_url, token)
         postings = [
             make_posting(base_url, token, invoice_date, description, 1500, total_amount, row=1),
-            make_posting(base_url, token, invoice_date, description, 3000, -total_amount, row=2),
+            make_posting(
+                base_url,
+                token,
+                invoice_date,
+                description,
+                3000,
+                -total_amount,
+                row=2,
+                vat_type_id=vat_type_id,
+            ),
         ]
         if customer_id:
             postings[0]["customer"] = {"id": customer_id}
@@ -879,8 +910,11 @@ def do_create_credit_note(base_url: str, token: str, payload: dict) -> None:
         print("No invoice found - creating credit voucher directly")
         customer_name_for_voucher = customer_name or "Unknown"
         pd = f"Kreditnota {customer_name_for_voucher}"
+        vat_type_id = lookup_vat_type_mva3(base_url, token)
         postings = [
-            make_posting(base_url, token, date, pd, 3000, invoice_amount, row=1),
+            make_posting(
+                base_url, token, date, pd, 3000, invoice_amount, row=1, vat_type_id=vat_type_id
+            ),
             make_posting(base_url, token, date, pd, 1500, -invoice_amount, row=2),
         ]
         cn_customer_id = customer_id
@@ -909,23 +943,27 @@ def do_create_credit_note(base_url: str, token: str, payload: dict) -> None:
     # /:createCreditNote blocked or failed — fall back to reversal voucher
     cn_amount = invoice_amount if invoice_amount else 10000
     description = f"Kreditnota {customer_name} {date}"
+    vat_type_id = lookup_vat_type_mva3(base_url, token)
     postings = [
-        make_posting(base_url, token, date, description, 3000, cn_amount, row=1),
+        make_posting(
+            base_url, token, date, description, 3000, cn_amount, row=1, vat_type_id=vat_type_id
+        ),
         make_posting(base_url, token, date, description, 1500, -cn_amount, row=2),
     ]
+    cn_customer_id = customer_id
+    if not cn_customer_id and customer_name:
+        r_cust = tx_get(base_url, token, "/customer", {"name": customer_name, "count": 1})
+        if r_cust.status_code == 200:
+            custs = r_cust.json().get("values", [])
+            if custs:
+                cn_customer_id = custs[0]["id"]
+    if cn_customer_id:
+        postings[1]["customer"] = {"id": cn_customer_id}
     voucher_body = {
         "date": date,
         "description": description,
         "postings": postings,
     }
-    if customer_id:
-        voucher_body["postings"][1]["customer"] = {"id": customer_id}
-    elif customer_name:
-        r_cust = tx_get(base_url, token, "/customer", {"name": customer_name, "count": 1})
-        if r_cust.status_code == 200:
-            custs = r_cust.json().get("values", [])
-            if custs:
-                voucher_body["postings"][1]["customer"] = {"id": custs[0]["id"]}
     r_v = tx_post(base_url, token, "/ledger/voucher", voucher_body)
     print(f"Credit note voucher -> {r_v.status_code}: {r_v.text[:200]}")
 

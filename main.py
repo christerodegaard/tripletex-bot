@@ -109,6 +109,10 @@ update_employee
   payload: { "firstName": string, "lastName": string, "email"?: string,
              "phoneNumber"?: string }
 
+log_hours
+  payload: { "employeeEmail": string, "projectName": string, "activityName"?: string,
+             "date": "YYYY-MM-DD", "hours": number, "hourlyRate"?: number }
+
 no_op
   payload: { "reason": string }
 
@@ -444,6 +448,63 @@ def do_update_employee(base_url: str, token: str, payload: dict) -> None:
     print(f"PUT /employee/{employee_id} -> {r2.status_code}: {r2.text[:200]}")
 
 
+def do_log_hours(base_url: str, token: str, payload: dict) -> None:
+    hours = payload.get("hours", 0)
+    date = payload.get("date", "2025-03-20")
+    employee_email = payload.get("employeeEmail", "")
+    project_name = payload.get("projectName", "")
+
+    # Find employee
+    employee_id = None
+    if employee_email:
+        r = tx_get(base_url, token, "/employee", {"email": employee_email})
+        if r.status_code == 200:
+            employees = r.json().get("values", [])
+            if employees:
+                employee_id = employees[0]["id"]
+
+    # Find project
+    project_id = None
+    if project_name:
+        r = tx_get(base_url, token, "/project", {"name": project_name, "count": 1})
+        if r.status_code == 200:
+            projects = r.json().get("values", [])
+            if projects:
+                project_id = projects[0]["id"]
+
+    # Find or use default activity
+    activity_id = None
+    activity_name = payload.get("activityName", "")
+    if activity_name:
+        r = tx_get(base_url, token, "/activity", {"name": activity_name, "count": 1})
+        if r.status_code == 200:
+            activities = r.json().get("values", [])
+            if activities:
+                activity_id = activities[0]["id"]
+    if not activity_id:
+        r = tx_get(base_url, token, "/activity", {"count": 1})
+        if r.status_code == 200:
+            activities = r.json().get("values", [])
+            if activities:
+                activity_id = activities[0]["id"]
+
+    if not employee_id or not project_id or not activity_id:
+        print(f"Missing required IDs for timekeeping: employee={employee_id} project={project_id} activity={activity_id}")
+        return
+
+    body = {
+        "date": date,
+        "hours": hours,
+        "employee": {"id": employee_id},
+        "project": {"id": project_id},
+        "activity": {"id": activity_id},
+    }
+    if payload.get("hourlyRate"):
+        body["hourlyRate"] = payload["hourlyRate"]
+
+    tx_post(base_url, token, "/timesheet/entry", body)
+
+
 # ---------------------------------------------------------------------------
 # Dispatcher
 # ---------------------------------------------------------------------------
@@ -463,6 +524,7 @@ ACTION_MAP = {
     "update_customer": do_update_customer,
     "delete_travel_expense": do_delete_travel_expense,
     "update_employee": do_update_employee,
+    "log_hours": do_log_hours,
 }
 
 

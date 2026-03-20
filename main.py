@@ -123,6 +123,7 @@ create_ledger_posting
   payload: { "description": string, "date": "YYYY-MM-DD",
              "debitAccount": "NNNN", "creditAccount": "NNNN", "amount": number,
              "departmentId"?: number, "departmentName"?: string }
+  When a ledger posting must be linked to a dimension value, pass the dimension value name as departmentName.
 
 create_travel_expense
   payload: { "employeeEmail"?: string, "description": string,
@@ -185,7 +186,10 @@ register_supplier_invoice
              "accountCode"?: string, "date": "YYYY-MM-DD" }
 
 create_accounting_dimension
-  payload: { "name": string, "values": ["string"] }
+  payload: { "name": string, "values": ["string"],
+             "description"?: string, "date"?: "YYYY-MM-DD",
+             "debitAccount"?: "NNNN", "creditAccount"?: "NNNN", "amount"?: number }
+  When the task also needs ledger postings, extract description, date, debitAccount, creditAccount, and amount for the companion create_ledger_posting action, and use the dimension value name as departmentName on create_ledger_posting.
 
 create_payroll
   payload: { "employeeEmail": string, "baseSalary": number,
@@ -651,14 +655,19 @@ def do_create_ledger_posting(base_url: str, token: str, payload: dict) -> None:
         "postings": postings,
     }
     if payload.get("departmentName"):
-        r_dept = tx_get(base_url, token, "/department",
-                       {"name": payload["departmentName"], "count": 1})
+        r_dept = tx_get(
+            base_url,
+            token,
+            "/department",
+            {"name": payload["departmentName"], "count": 1},
+        )
         if r_dept.status_code == 200:
             depts = r_dept.json().get("values", [])
             if depts:
                 dept_ref = {"id": depts[0]["id"]}
                 for posting in body["postings"]:
                     posting["department"] = dept_ref
+                print(f"Added department {depts[0]['id']} to all postings")
     elif payload.get("departmentId") is not None:
         try:
             dept_ref = {"id": int(payload["departmentId"])}

@@ -60,9 +60,102 @@ def create_product(base_url: str, token: str, name: str) -> None:
         print(f"API error (product): {e}")
 
 
+def do_create_employee(base_url: str, token: str, payload: dict) -> None:
+    first = payload.get("firstName", "")
+    last = payload.get("lastName", "")
+
+    # If Claude put the full name in firstName and left lastName empty, split it
+    if first and not last:
+        parts = first.rsplit(" ", 1)
+        first = parts[0]
+        last = parts[1] if len(parts) > 1 else "Unknown"
+
+    body = {
+        "firstName": first or "Unknown",
+        "lastName": last or "Employee",
+    }
+    for field in ("email", "employeeNumber"):
+        if payload.get(field):
+            body[field] = payload[field]
+    tx_post(base_url, token, "/employee", body)
+
+
+def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
+    customer_name = payload.get("customer_name", "Unknown Customer")
+    invoice_date = payload.get("invoiceDate", "2025-03-20")
+    due_date = payload.get("invoiceDueDate", "2025-04-20")
+
+    # Step 1: find or create the customer
+    r = tx_get(base_url, token, "/customer", {"name": customer_name, "count": 1})
+    customer_id = None
+    if r.status_code == 200:
+        customers = r.json().get("values", [])
+        if customers:
+            customer_id = customers[0]["id"]
+
+    if customer_id is None:
+        r2 = tx_post(base_url, token, "/customer", {"name": customer_name})
+        if r2.status_code in (200, 201):
+            customer_id = r2.json().get("value", {}).get("id")
+
+    if customer_id is None:
+        print("Could not find or create customer for invoice — aborting")
+        return
+
+    # Step 2: create order with order lines
+    raw_orders = payload.get("orders") or []
+    if not raw_orders:
+        raw_orders = [{"description": "Service", "unitPriceExcludingVatCurrency": 0, "count": 1}]
+
+    order_lines = [
+        {
+            "description": item.get("description", "Item"),
+            "unitPriceExcludingVatCurrency": item.get("unitPriceExcludingVatCurrency", 0),
+            "count": item.get("count", 1),
+        }
+        for item in raw_orders
+    ]
+
+    order_body = {
+        "customer": {"id": customer_id},
+        "orderDate": invoice_date,
+        "orderLines": order_lines,
+    }
+    r3 = tx_post(base_url, token, "/order", order_body)
+    if r3.status_code not in (200, 201):
+        print(f"Order creation failed ({r3.status_code}) — cannot create invoice")
+        return
+
+    order_id = r3.json().get("value", {}).get("id")
+    if not order_id:
+        print("No order ID returned — cannot create invoice")
+        return
+
+    # Step 3: invoice from order
+    invoice_body = {
+        "invoiceDate": invoice_date,
+        "invoiceDueDate": due_date,
+        "orders": [{"id": order_id}],
+    }
+    tx_post(base_url, token, "/invoice", invoice_body)
+
+
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+@app.post("/test-interpret")
+def test_interpret(body: dict) -> dict:
+    """Debug endpoint: returns Claude's action plan for a given prompt without calling Tripletex."""
+    prompt = body.get("prompt", "")
+    if not prompt:
+        return {"error": "prompt is required"}
+    try:
+        plan = ask_claude(prompt)
+        return {"prompt": prompt, "plan": plan}
+    except Exception as e:
+        return {"error": str(e)}
 
 
 @app.post("/solve")

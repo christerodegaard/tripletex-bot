@@ -739,41 +739,56 @@ def do_register_payment(base_url: str, token: str, payload: dict) -> None:
         print("No invoice found to register payment against")
         return
 
-    payment_body = {
+    url = f"{base_url.rstrip('/')}/invoice/{invoice_id}/:payment"
+
+    # Try 1: camelCase Tripletex standard field names
+    r2 = requests.put(url, auth=tx_auth(token), json={
         "paymentDate": date,
         "paidAmount": amount,
         "paymentTypeId": 1,
-    }
-    url = f"{base_url.rstrip('/')}/invoice/{invoice_id}/:payment"
-
-    # Try 1: all fields in JSON body
-    r2 = requests.put(url, auth=tx_auth(token), json=payment_body, timeout=30)
-    print(f"PUT /invoice/{invoice_id}/:payment (body) -> {r2.status_code}: {r2.text[:300]}")
+    }, timeout=30)
+    print(f"payment try1 -> {r2.status_code}: {r2.text[:300]}")
     if r2.status_code in (200, 201):
         return
 
-    # Try 2: fields as query params
+    # Try 2: all as query parameters (Tripletex sometimes uses this for action endpoints)
     r3 = requests.put(url, auth=tx_auth(token),
-                      params={"paymentDate": date, "paidAmount": amount, "paymentTypeId": 1},
-                      timeout=30)
-    print(f"PUT /invoice/{invoice_id}/:payment (params) -> {r3.status_code}: {r3.text[:300]}")
+                      params={"paymentDate": date, "paidAmount": str(amount), "paymentTypeId": "1"},
+                      json={}, timeout=30)
+    print(f"payment try2 -> {r3.status_code}: {r3.text[:300]}")
     if r3.status_code in (200, 201):
         return
 
-    # Try 3: minimal body with just date and amount, no paymentTypeId
-    r4 = requests.put(url, auth=tx_auth(token),
-                      json={"paymentDate": date, "paidAmount": amount},
-                      timeout=30)
-    print(f"PUT /invoice/{invoice_id}/:payment (minimal) -> {r4.status_code}: {r4.text[:300]}")
+    # Try 3: snake_case field names
+    r4 = requests.put(url, auth=tx_auth(token), json={
+        "payment_date": date,
+        "paid_amount": amount,
+        "payment_type_id": 1,
+    }, timeout=30)
+    print(f"payment try3 -> {r4.status_code}: {r4.text[:300]}")
     if r4.status_code in (200, 201):
         return
 
-    # Try 4: date as query param only
+    # Try 4: minimal — just amount and date as query params, empty body
     r5 = requests.put(url, auth=tx_auth(token),
-                      params={"paymentDate": date},
-                      json={"paidAmount": amount, "paymentTypeId": 1},
+                      params={"date": date, "amount": str(amount)},
                       timeout=30)
-    print(f"PUT /invoice/{invoice_id}/:payment (mixed) -> {r5.status_code}: {r5.text[:300]}")
+    print(f"payment try4 -> {r5.status_code}: {r5.text[:300]}")
+    if r5.status_code in (200, 201):
+        return
+
+    # Try 5: GET the invoice first to see its full structure, use version for optimistic locking
+    r_inv = tx_get(base_url, token, f"/invoice/{invoice_id}")
+    if r_inv.status_code == 200:
+        inv = r_inv.json().get("value", {})
+        version = inv.get("version", 0)
+        r6 = requests.put(url, auth=tx_auth(token), json={
+            "version": version,
+            "paymentDate": date,
+            "paidAmount": amount,
+            "paymentTypeId": 1,
+        }, timeout=30)
+        print(f"payment try5 (with version) -> {r6.status_code}: {r6.text[:300]}")
 
 
 def do_create_credit_note(base_url: str, token: str, payload: dict) -> None:

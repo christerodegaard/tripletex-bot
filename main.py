@@ -374,6 +374,14 @@ def do_create_product(base_url: str, token: str, payload: dict) -> None:
         print("Product number in use, retrying without number")
         body.pop("number", None)
         r = tx_post(base_url, token, "/product", body)
+    if r.status_code == 422 and ("allerede registrert" in r.text or "er i bruk" in r.text):
+        print("Product name also in use, looking up existing product")
+        r_lookup = tx_get(base_url, token, "/product", {"name": body.get("name", ""), "count": 1})
+        if r_lookup.status_code == 200:
+            products = r_lookup.json().get("values", [])
+            if products:
+                print(f"Found existing product id: {products[0]['id']}")
+                return  # Product already exists, that's fine
 
 
 def do_update_product(base_url: str, token: str, payload: dict) -> None:

@@ -123,8 +123,9 @@ create_ledger_posting
              "departmentId"?: number, "departmentName"?: string }
 
 create_travel_expense
-  payload: { "description": string, "date": "YYYY-MM-DD", "amount": number,
-             "category"?: string }
+  payload: { "employeeEmail"?: string, "description": string,
+             "date": "YYYY-MM-DD", "amount": number,
+             "departureFrom"?: string, "destination"?: string }
 
 register_payment
   payload: { "customer_name"?: string, "invoiceId"?: number,
@@ -582,30 +583,44 @@ def do_create_payroll(base_url: str, token: str, payload: dict) -> None:
 
 
 def do_create_travel_expense(base_url: str, token: str, payload: dict) -> None:
-    # Find employee to attach expense to
-    r_emp = tx_get(base_url, token, "/employee", {"count": 1})
+    employee_email = payload.get("employeeEmail", "")
+    date = payload.get("date", "2025-03-20")
+    description = payload.get("description", "Travel expense")
+    departure_from = payload.get("departureFrom", "Oslo")
+    destination = payload.get("destination", "Bergen")
+
+    # Find employee by email or use first
     employee_id = None
-    if r_emp.status_code == 200:
-        employees = r_emp.json().get("values", [])
-        if employees:
-            employee_id = employees[0]["id"]
+    if employee_email:
+        r = tx_get(base_url, token, "/employee", {"email": employee_email})
+        if r.status_code == 200:
+            employees = r.json().get("values", [])
+            if employees:
+                employee_id = employees[0]["id"]
+    if not employee_id:
+        r = tx_get(base_url, token, "/employee", {"count": 1})
+        if r.status_code == 200:
+            employees = r.json().get("values", [])
+            if employees:
+                employee_id = employees[0]["id"]
     if not employee_id:
         print("No employee found for travel expense")
         return
+
     body = {
         "employee": {"id": employee_id},
-        "description": payload.get("description", "Travel expense"),
         "travelDetails": {
-            "departureDate": payload.get("date", "2025-03-20") + "T08:00:00",
-            "returnDate": payload.get("date", "2025-03-20") + "T18:00:00",
-            "departureFrom": payload.get("departureFrom", "Oslo"),
-            "destination": payload.get("destination", "Bergen"),
+            "departureDate": date + "T08:00:00",
+            "returnDate": date + "T18:00:00",
+            "departureFrom": departure_from,
+            "destination": destination,
             "departureTransportation": "CAR",
             "returnTransportation": "CAR",
         },
         "isCompleted": False,
     }
-    tx_post(base_url, token, "/travelExpense", body)
+    r2 = tx_post(base_url, token, "/travelExpense", body)
+    print(f"travelExpense -> {r2.status_code}: {r2.text[:200]}")
 
 
 def do_register_payment(base_url: str, token: str, payload: dict) -> None:

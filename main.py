@@ -77,8 +77,12 @@ create_supplier
              "postalCode"?: string, "city"?: string, "country"?: string }
 
 create_product
-  payload: { "name": string, "number"?: string, "costExcludingVatCurrency"?: number,
-             "priceExcludingVatCurrency"?: number, "priceIncludingVatCurrency"?: number }
+  payload: { "name": string, "number"?: string,
+             "priceExcludingVatCurrency"?: number,
+             "costExcludingVatCurrency"?: number,
+             "vatTypeId"?: number }
+
+Note: NEVER include priceIncludingVatCurrency - it causes validation errors.
 
 create_employee
   payload: { "firstName": string, "lastName": string, "email"?: string,
@@ -277,10 +281,11 @@ def do_create_supplier(base_url: str, token: str, payload: dict) -> None:
 
 def do_create_product(base_url: str, token: str, payload: dict) -> None:
     body = {"name": payload.get("name", "Unknown Product")}
-    for field in ("number", "costExcludingVatCurrency",
-                  "priceExcludingVatCurrency", "priceIncludingVatCurrency"):
+    for field in ("number", "costExcludingVatCurrency", "priceExcludingVatCurrency"):
         if payload.get(field) is not None:
             body[field] = payload[field]
+    if payload.get("vatTypeId"):
+        body["vatTypeId"] = payload["vatTypeId"]
     tx_post(base_url, token, "/product", body)
 
 

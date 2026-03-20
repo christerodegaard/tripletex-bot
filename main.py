@@ -93,8 +93,7 @@ create_supplier
 create_product
   payload: { "name": string, "number"?: string,
              "priceExcludingVatCurrency"?: number,
-             "costExcludingVatCurrency"?: number,
-             "vatTypeId"?: number }
+             "costExcludingVatCurrency"?: number }
 
 Note: NEVER include priceIncludingVatCurrency - it causes validation errors.
 
@@ -314,8 +313,6 @@ def do_create_product(base_url: str, token: str, payload: dict) -> None:
     for field in ("number", "costExcludingVatCurrency", "priceExcludingVatCurrency"):
         if payload.get(field) is not None:
             body[field] = payload[field]
-    if payload.get("vatTypeId"):
-        body["vatTypeId"] = payload["vatTypeId"]
     r = tx_post(base_url, token, "/product", body)
     if r.status_code == 422 and "er i bruk" in r.text:
         print("Product number in use, retrying without number")

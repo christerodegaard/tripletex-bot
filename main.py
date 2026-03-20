@@ -792,6 +792,8 @@ def do_register_supplier_invoice(base_url: str, token: str, payload: dict) -> No
         if r2.status_code in (200, 201):
             supplier_id = r2.json().get("value", {}).get("id")
 
+    _ = supplier_id  # ensure supplier exists; not sent on voucher body
+
     # Create voucher with postings
     description = f"{invoice_number} - {supplier_name}" if invoice_number else supplier_name
     voucher_body = {
@@ -821,8 +823,6 @@ def do_register_supplier_invoice(base_url: str, token: str, payload: dict) -> No
             }
         ]
     }
-    if supplier_id:
-        voucher_body["supplier"] = {"id": supplier_id}
     tx_post(base_url, token, "/ledger/voucher", voucher_body)
 
 

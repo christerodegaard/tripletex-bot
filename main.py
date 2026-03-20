@@ -223,44 +223,30 @@ def tx_get(base_url: str, token: str, path: str, params: dict = None) -> request
     return r
 
 
-def debug_company_endpoints(base_url: str, token: str) -> None:
-    """Try all company endpoints to find which ones work."""
-    endpoints = [
-        "/company",
-        "/companyWithLoginAccess",
-        "/company/withLoginAccess",
-        "/token/employee",
-        "/employee/current",
-        "/employee/current/employmentId",
-    ]
-    for ep in endpoints:
-        r = tx_get(base_url, token, ep)
-        print(f"DEBUG {ep} -> {r.status_code}: {r.text[:150]}")
-
-
 def set_bank_account(base_url: str, token: str) -> bool:
-    """Try multiple endpoints to find and set company bank account."""
-    # Try /token/employee first to get company context
-    for path in ["/companyWithLoginAccess", "/company/withLoginAccess",
-                 "/internaltransaction/company"]:
-        r = tx_get(base_url, token, path)
-        print(f"Trying {path} -> {r.status_code}")
-        if r.status_code == 200:
-            data = r.json()
-            value = data.get("value", data.get("values", [{}]))
-            if isinstance(value, list):
-                company = value[0] if value else {}
-            else:
-                company = value
-            company_id = company.get("id")
-            if company_id:
-                url = f"{base_url.rstrip('/')}/company/{company_id}"
-                r2 = requests.put(url, auth=tx_auth(token),
-                                 json={"id": company_id,
-                                       "bankAccountNumber": "15060126900"},
-                                 timeout=30)
-                print(f"Set bank account -> {r2.status_code}: {r2.text[:300]}")
-                return r2.status_code in (200, 201)
+    """Set company bank account by trying PUT /company with known IDs."""
+    # Try GET /employee/current to get company context
+    r = tx_get(base_url, token, "/employee/current")
+    if r.status_code == 200:
+        data = r.json().get("value", {})
+        company_id = None
+        # Try to extract company ID from employee data
+        if data.get("company"):
+            company_id = data["company"].get("id")
+        if not company_id:
+            # Try /employee/current/employmentId or similar
+            dept = data.get("department", {})
+            if dept:
+                company_id = dept.get("company", {}).get("id")
+        if company_id:
+            url = f"{base_url.rstrip('/')}/company/{company_id}"
+            r2 = requests.put(url, auth=tx_auth(token),
+                             json={"id": company_id,
+                                   "bankAccountNumber": "15060126900"},
+                             timeout=30)
+            print(f"set_bank_account PUT -> {r2.status_code}: {r2.text[:200]}")
+            return r2.status_code in (200, 201)
+    print(f"set_bank_account: employee/current -> {r.status_code}")
     return False
 
 
@@ -911,7 +897,6 @@ def solve(body: SolveRequest) -> dict:
     print(f"=== incoming prompt: {body.prompt!r} ===")
     base_url = body.tripletex_credentials.base_url
     token = body.tripletex_credentials.session_token
-    debug_company_endpoints(base_url, token)
     try:
         user_content = []
         for f in (body.files or []):

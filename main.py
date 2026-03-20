@@ -94,8 +94,8 @@ create_product
   payload: { "name": string, "number"?: string,
              "priceExcludingVatCurrency"?: number,
              "costExcludingVatCurrency"?: number }
-
-Note: NEVER include priceIncludingVatCurrency - it causes validation errors.
+  NEVER include vatTypeId or any VAT-related fields — they cause validation errors.
+  Ignore any VAT rate mentioned in the prompt.
 
 create_employee
   payload: { "firstName": string, "lastName": string, "email"?: string,
@@ -123,8 +123,10 @@ create_ledger_posting
 
 create_travel_expense
   payload: { "employeeEmail"?: string, "description": string,
-             "date": "YYYY-MM-DD", "amount": number,
-             "departureFrom"?: string, "destination"?: string }
+             "date": "YYYY-MM-DD", "departureFrom"?: string, "destination"?: string }
+  Always extract employeeEmail when an email is mentioned.
+  Use "description" for the trip title/purpose only.
+  Do NOT include amount, cost, category, or any cost breakdown fields.
 
 register_payment
   payload: { "customer_name"?: string, "invoiceId"?: number,
@@ -617,7 +619,7 @@ def do_create_payroll(base_url: str, token: str, payload: dict) -> None:
 def do_create_travel_expense(base_url: str, token: str, payload: dict) -> None:
     employee_email = payload.get("employeeEmail", "")
     date = payload.get("date", "2025-03-20")
-    description = payload.get("description", "Travel expense")
+    title = payload.get("description", "Travel expense")
     departure_from = payload.get("departureFrom", "Oslo")
     destination = payload.get("destination", "Bergen")
 
@@ -641,7 +643,7 @@ def do_create_travel_expense(base_url: str, token: str, payload: dict) -> None:
 
     body = {
         "employee": {"id": employee_id},
-        "title": description,
+        "title": title,
         "travelDetails": {
             "departureDate": date + "T08:00:00",
             "returnDate": date + "T18:00:00",

@@ -295,12 +295,14 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
         company = r_company.json().get("value", {})
         company_id = company.get("id")
         if company_id and not company.get("bankAccountNumber"):
-            requests.put(
-                f"{base_url.rstrip('/')}/company/{company_id}",
+            put_url = f"{base_url.rstrip('/')}/company/{company_id}"
+            r_put = requests.put(
+                put_url,
                 auth=tx_auth(token),
-                json={"bankAccountNumber": "15060126900"},
+                json={"id": company_id, "bankAccountNumber": "15060126900"},
                 timeout=30,
             )
+            print(f"PUT /company/{company_id} bankAccount -> {r_put.status_code}: {r_put.text[:200]}")
 
     # Step 1: find or create customer
     r = tx_get(base_url, token, "/customer", {"name": customer_name, "count": 1})
@@ -611,6 +613,23 @@ def solve(body: SolveRequest) -> dict:
     print(f"=== incoming prompt: {body.prompt!r} ===")
     base_url = body.tripletex_credentials.base_url
     token = body.tripletex_credentials.session_token
+    # Pre-set company bank account for invoice support
+    try:
+        r_co = tx_get(base_url, token, "/company")
+        if r_co.status_code == 200:
+            co = r_co.json().get("value", {})
+            co_id = co.get("id")
+            if co_id and not co.get("bankAccountNumber"):
+                put_url = f"{base_url.rstrip('/')}/company/{co_id}"
+                r_put = requests.put(
+                    put_url,
+                    auth=tx_auth(token),
+                    json={"id": co_id, "bankAccountNumber": "15060126900"},
+                    timeout=30,
+                )
+                print(f"Pre-set bank account -> {r_put.status_code}: {r_put.text[:200]}")
+    except Exception as e:
+        print(f"Bank account pre-set error: {e}")
     try:
         user_content = []
         for f in (body.files or []):

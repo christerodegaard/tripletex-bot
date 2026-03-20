@@ -298,27 +298,15 @@ def make_posting(
 
 
 def lookup_vat_type_mva3(base_url: str, token: str) -> Optional[int]:
-    """Resolve output VAT type id (mva-kode 3: Utgående avgift, høy sats)."""
+    """Resolve VAT type id for mva-kode 3 (Utgående avgift, høy sats) by exact number."""
     vat_type_id = None
-    r_vat = tx_get(base_url, token, "/ledger/vatType", {"count": 10})
+    r_vat = tx_get(base_url, token, "/ledger/vatType", {"count": 50})
     if r_vat.status_code == 200:
-        vat_types = r_vat.json().get("values", [])
-        for vt in vat_types:
-            number = str(vt.get("number", ""))
-            name = vt.get("name", "").lower()
-            if number == "3" or ("utgående" in name and "høy" in name):
+        for vt in r_vat.json().get("values", []):
+            if str(vt.get("number", "")) == "3":
                 vat_type_id = vt["id"]
-                print(f"Output VAT type -> id {vat_type_id} ({vt.get('name')})")
+                print(f"Found VAT type 3 -> id {vat_type_id} ({vt.get('name')})")
                 break
-
-    if not vat_type_id:
-        r_vat2 = tx_get(base_url, token, "/ledger/vatType", {"count": 50})
-        if r_vat2.status_code == 200:
-            for vt in r_vat2.json().get("values", []):
-                name = vt.get("name", "").lower()
-                if "utgående" in name and "høy" in name:
-                    vat_type_id = vt["id"]
-                    break
     return vat_type_id
 
 

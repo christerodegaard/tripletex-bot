@@ -1,5 +1,6 @@
 import json
 import re
+import threading
 import time
 from typing import List, Optional
 
@@ -9,6 +10,19 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 
 app = FastAPI(title="Tripletex competition bot")
+
+
+def keep_alive():
+    while True:
+        time.sleep(600)  # 10 minutes
+        try:
+            requests.get("https://tripletex-bot.onrender.com/health", timeout=10)
+            print("Keep-alive ping sent")
+        except Exception:
+            pass
+
+
+threading.Thread(target=keep_alive, daemon=True).start()
 
 
 # ---------------------------------------------------------------------------

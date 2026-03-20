@@ -624,10 +624,15 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
     elif r_inv.status_code == 422 and "bankkontonummer" in r_inv.text:
         print("Bank account missing - falling back to ledger voucher")
 
+        VAT_ACCOUNT_MAP = {
+            25: 3000,  # Salgsinntekt, avgiftspliktig
+            15: 3100,  # Salgsinntekt, middels sats (food/beverage)
+            0: 3200,  # Salgsinntekt, avgiftsfri (exempt)
+        }
+
         description = f"Faktura {customer_name} {invoice_date} (ordre {order_id})"
         postings = []
         acct_1500 = get_account_id(base_url, token, 1500)
-        acct_3000 = get_account_id(base_url, token, 3000)
         vat_25 = get_vat_type_id_by_number(base_url, token, "3")
         vat_15 = get_vat_type_id_by_number(base_url, token, "33")
 
@@ -643,6 +648,9 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
                 vat_rate = int(round(float(raw_vat)))
             if vat_rate not in (0, 15, 25):
                 vat_rate = 25
+
+            revenue_account_num = VAT_ACCOUNT_MAP.get(vat_rate, 3000)
+            acct_revenue = get_account_id(base_url, token, revenue_account_num)
 
             debit = {
                 "row": row,
@@ -660,7 +668,7 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
                 "row": row,
                 "date": invoice_date,
                 "description": description,
-                "account": {"id": acct_3000},
+                "account": {"id": acct_revenue},
                 "amount": -amount,
                 "amountCurrency": -amount,
             }

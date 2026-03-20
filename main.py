@@ -174,6 +174,14 @@ def do_create_employee(base_url: str, token: str, payload: dict) -> None:
     for field in ("email", "employeeNumber"):
         if payload.get(field):
             body[field] = payload[field]
+    if not body.get("email"):
+        safe_name = (first + "." + last).lower().replace(" ", "")
+        body["email"] = f"{safe_name}@example.com"
+    dept_r = tx_get(base_url, token, "/department", {"count": 1})
+    if dept_r.status_code == 200:
+        depts = dept_r.json().get("values", [])
+        if depts:
+            body["department"] = {"id": depts[0]["id"]}
     tx_post(base_url, token, "/employee", body)
 
 

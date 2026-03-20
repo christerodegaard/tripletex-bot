@@ -384,6 +384,13 @@ def do_create_project(base_url: str, token: str, payload: dict) -> None:
             employees = r.json().get("values", [])
             if employees:
                 body["projectManager"] = {"id": employees[0]["id"]}
+    if payload.get("customerName"):
+        r_cust = tx_get(base_url, token, "/customer",
+                       {"name": payload["customerName"], "count": 1})
+        if r_cust.status_code == 200:
+            customers = r_cust.json().get("values", [])
+            if customers:
+                body["customer"] = {"id": customers[0]["id"]}
     r = tx_post(base_url, token, "/project", body)
     if r.status_code == 422 and "i bruk" in r.text:
         print("Project name/number in use, retrying without number")

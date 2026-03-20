@@ -402,7 +402,7 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
         return
 
     # Step 3: invoice from order - try different send types
-    for send_type in [None, "EMAIL", "EHFT"]:
+    for send_type in [None, "EMAIL", "EHF", "PAPER"]:
         invoice_body = {
             "invoiceDate": invoice_date,
             "invoiceDueDate": due_date,

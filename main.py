@@ -115,6 +115,10 @@ log_hours
   payload: { "employeeEmail": string, "projectName": string, "activityName"?: string,
              "date": "YYYY-MM-DD", "hours": number, "hourlyRate"?: number }
 
+update_product
+  payload: { "name": string, "priceExcludingVatCurrency"?: number,
+             "priceIncludingVatCurrency"?: number, "costExcludingVatCurrency"?: number }
+
 no_op
   payload: { "reason": string }
 
@@ -222,6 +226,28 @@ def do_create_product(base_url: str, token: str, payload: dict) -> None:
     tx_post(base_url, token, "/product", body)
 
 
+def do_update_product(base_url: str, token: str, payload: dict) -> None:
+    name = payload.get("name", "")
+    r = tx_get(base_url, token, "/product", {"name": name, "count": 1})
+    if r.status_code != 200:
+        return
+    products = r.json().get("values", [])
+    if not products:
+        print(f"No product found: {name}")
+        return
+    product_id = products[0]["id"]
+    update_body = {}
+    for field in ("priceExcludingVatCurrency", "priceIncludingVatCurrency",
+                  "costExcludingVatCurrency", "number"):
+        if payload.get(field) is not None:
+            update_body[field] = payload[field]
+    if not update_body:
+        return
+    url = f"{base_url.rstrip('/')}/product/{product_id}"
+    r2 = requests.put(url, auth=tx_auth(token), json=update_body, timeout=30)
+    print(f"PUT /product/{product_id} -> {r2.status_code}: {r2.text[:200]}")
+
+
 def do_create_employee(base_url: str, token: str, payload: dict) -> None:
     first = payload.get("firstName", "")
     last = payload.get("lastName", "")
@@ -261,6 +287,7 @@ def do_create_project(base_url: str, token: str, payload: dict) -> None:
         "startDate": payload.get("startDate", "2025-03-20"),
         "endDate": payload.get("endDate", "2026-03-20"),
     }
+    body["number"] = payload.get("number", "")
     if payload.get("projectManagerEmail"):
         r = tx_get(base_url, token, "/employee",
                    {"email": payload["projectManagerEmail"]})
@@ -381,14 +408,29 @@ def do_create_ledger_posting(base_url: str, token: str, payload: dict) -> None:
 
 
 def do_create_travel_expense(base_url: str, token: str, payload: dict) -> None:
+    # Find employee to attach expense to
+    r_emp = tx_get(base_url, token, "/employee", {"count": 1})
+    employee_id = None
+    if r_emp.status_code == 200:
+        employees = r_emp.json().get("values", [])
+        if employees:
+            employee_id = employees[0]["id"]
+    if not employee_id:
+        print("No employee found for travel expense")
+        return
     body = {
+        "employee": {"id": employee_id},
         "description": payload.get("description", "Travel expense"),
-        "date": payload.get("date", "2025-03-20"),
-        "costType": {"id": 1},
+        "travelDetails": {
+            "departureDate": payload.get("date", "2025-03-20") + "T08:00:00",
+            "returnDate": payload.get("date", "2025-03-20") + "T18:00:00",
+            "departureFrom": payload.get("departureFrom", "Oslo"),
+            "destination": payload.get("destination", "Bergen"),
+            "departureTransportation": "CAR",
+            "returnTransportation": "CAR",
+        },
         "isCompleted": False,
     }
-    if payload.get("amount") is not None:
-        body["amount"] = payload["amount"]
     tx_post(base_url, token, "/travelExpense", body)
 
 
@@ -554,6 +596,7 @@ ACTION_MAP = {
     "create_customer": do_create_customer,
     "create_supplier": do_create_supplier,
     "create_product": do_create_product,
+    "update_product": do_update_product,
     "create_employee": do_create_employee,
     "create_project": do_create_project,
     "create_department": do_create_department,

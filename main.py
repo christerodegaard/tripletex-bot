@@ -1341,9 +1341,23 @@ def do_register_supplier_invoice(base_url: str, token: str, payload: dict) -> No
         body = {"name": supplier_name, "isSupplier": True}
         if org_no:
             body["organizationNumber"] = org_no
-        r2 = tx_post(base_url, token, "/customer", body)
-        if r2.status_code in (200, 201):
-            supplier_id = r2.json().get("value", {}).get("id")
+        r_supplier = tx_post(base_url, token, "/customer", body)
+        if r_supplier.status_code in (200, 201):
+            val = r_supplier.json().get("value", {})
+            sid = val.get("id")
+            if sid:
+                supplier_id = sid
+                put_body = {
+                    k: v
+                    for k, v in val.items()
+                    if k not in ("url", "changes", "displayName")
+                }
+                put_body["isCustomer"] = False
+                put_url = f"{base_url.rstrip('/')}/customer/{sid}"
+                r_put = requests.put(
+                    put_url, auth=tx_auth(token), json=put_body, timeout=30
+                )
+                print(f"PUT supplier isCustomer=False -> {r_put.status_code}")
 
     # Create voucher with postings
     description = f"{invoice_number} - {supplier_name}" if invoice_number else supplier_name

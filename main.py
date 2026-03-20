@@ -60,7 +60,8 @@ create_customer
 
 create_supplier
   payload: { "name": string, "email"?: string, "phoneNumber"?: string,
-             "organizationNumber"?: string }
+             "organizationNumber"?: string, "address"?: string,
+             "postalCode"?: string, "city"?: string, "country"?: string }
 
 create_product
   payload: { "name": string, "number"?: string, "costExcludingVatCurrency"?: number,

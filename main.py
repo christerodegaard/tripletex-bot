@@ -715,7 +715,7 @@ def do_create_credit_note(base_url: str, token: str, payload: dict) -> None:
         return
 
     url = f"{base_url.rstrip('/')}/invoice/{invoice_id}/:createCreditNote"
-    r4 = requests.put(url, auth=tx_auth(token), json={"date": date}, timeout=30)
+    r4 = requests.put(url, auth=tx_auth(token), params={"date": date}, json={}, timeout=30)
     print(f"PUT /invoice/{invoice_id}/:createCreditNote -> {r4.status_code}: {r4.text[:200]}")
 
 

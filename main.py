@@ -173,6 +173,27 @@ def tx_get(base_url: str, token: str, path: str, params: dict = None) -> request
     return r
 
 
+def set_bank_account(base_url: str, token: str) -> bool:
+    """Try to set company bank account number using companyWithLoginAccess."""
+    r = tx_get(base_url, token, "/companyWithLoginAccess")
+    if r.status_code == 200:
+        values = r.json().get("value", {})
+        if isinstance(values, list):
+            company = values[0] if values else {}
+        else:
+            company = values
+        company_id = company.get("id")
+        if company_id:
+            url = f"{base_url.rstrip('/')}/company/{company_id}"
+            r2 = requests.put(url, auth=tx_auth(token),
+                             json={"id": company_id, "bankAccountNumber": "15060126900"},
+                             timeout=30)
+            print(f"Set bank account -> {r2.status_code}: {r2.text[:200]}")
+            return r2.status_code in (200, 201)
+    print(f"companyWithLoginAccess -> {r.status_code}: {r.text[:200]}")
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Action executors
 # ---------------------------------------------------------------------------
@@ -316,21 +337,6 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
     invoice_date = payload.get("invoiceDate", "2025-03-20")
     due_date = payload.get("invoiceDueDate", "2025-04-20")
 
-    # Set company bank account number (required for invoicing)
-    r_company = tx_get(base_url, token, "/company")
-    if r_company.status_code == 200:
-        company = r_company.json().get("value", {})
-        company_id = company.get("id")
-        if company_id and not company.get("bankAccountNumber"):
-            put_url = f"{base_url.rstrip('/')}/company/{company_id}"
-            r_put = requests.put(
-                put_url,
-                auth=tx_auth(token),
-                json={"id": company_id, "bankAccountNumber": "15060126900"},
-                timeout=30,
-            )
-            print(f"PUT /company/{company_id} bankAccount -> {r_put.status_code}: {r_put.text[:200]}")
-
     # Step 1: find or create customer
     r = tx_get(base_url, token, "/customer", {"name": customer_name, "count": 1})
     customer_id = None
@@ -383,17 +389,9 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
     }
     r_inv = tx_post(base_url, token, "/invoice", invoice_body)
     if r_inv.status_code == 422 and "bankkontonummer" in r_inv.text:
-        print("Attempting to set company bank account number...")
-        # Try to find and update company settings
-        r_company = tx_get(base_url, token, "/company")
-        if r_company.status_code == 200:
-            company_id = r_company.json().get("value", {}).get("id")
-            if company_id:
-                tx_post(base_url, token, f"/company/{company_id}",
-                       {"bankAccountNumber": "15060126900"})
-                # Retry invoice
-                r_inv2 = tx_post(base_url, token, "/invoice", invoice_body)
-                print(f"Invoice retry -> {r_inv2.status_code}")
+        if set_bank_account(base_url, token):
+            r_inv = tx_post(base_url, token, "/invoice", invoice_body)
+            print(f"Invoice retry -> {r_inv.status_code}")
 
 
 def do_create_ledger_posting(base_url: str, token: str, payload: dict) -> None:
@@ -656,23 +654,7 @@ def solve(body: SolveRequest) -> dict:
     print(f"=== incoming prompt: {body.prompt!r} ===")
     base_url = body.tripletex_credentials.base_url
     token = body.tripletex_credentials.session_token
-    # Pre-set company bank account for invoice support
-    try:
-        r_co = tx_get(base_url, token, "/company")
-        if r_co.status_code == 200:
-            co = r_co.json().get("value", {})
-            co_id = co.get("id")
-            if co_id and not co.get("bankAccountNumber"):
-                put_url = f"{base_url.rstrip('/')}/company/{co_id}"
-                r_put = requests.put(
-                    put_url,
-                    auth=tx_auth(token),
-                    json={"id": co_id, "bankAccountNumber": "15060126900"},
-                    timeout=30,
-                )
-                print(f"Pre-set bank account -> {r_put.status_code}: {r_put.text[:200]}")
-    except Exception as e:
-        print(f"Bank account pre-set error: {e}")
+    set_bank_account(base_url, token)
     try:
         user_content = []
         for f in (body.files or []):

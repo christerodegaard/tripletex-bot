@@ -745,8 +745,35 @@ def do_register_payment(base_url: str, token: str, payload: dict) -> None:
         "paymentTypeId": 1,
     }
     url = f"{base_url.rstrip('/')}/invoice/{invoice_id}/:payment"
+
+    # Try 1: all fields in JSON body
     r2 = requests.put(url, auth=tx_auth(token), json=payment_body, timeout=30)
-    print(f"PUT /invoice/{invoice_id}/:payment -> {r2.status_code}: {r2.text[:200]}")
+    print(f"PUT /invoice/{invoice_id}/:payment (body) -> {r2.status_code}: {r2.text[:300]}")
+    if r2.status_code in (200, 201):
+        return
+
+    # Try 2: fields as query params
+    r3 = requests.put(url, auth=tx_auth(token),
+                      params={"paymentDate": date, "paidAmount": amount, "paymentTypeId": 1},
+                      timeout=30)
+    print(f"PUT /invoice/{invoice_id}/:payment (params) -> {r3.status_code}: {r3.text[:300]}")
+    if r3.status_code in (200, 201):
+        return
+
+    # Try 3: minimal body with just date and amount, no paymentTypeId
+    r4 = requests.put(url, auth=tx_auth(token),
+                      json={"paymentDate": date, "paidAmount": amount},
+                      timeout=30)
+    print(f"PUT /invoice/{invoice_id}/:payment (minimal) -> {r4.status_code}: {r4.text[:300]}")
+    if r4.status_code in (200, 201):
+        return
+
+    # Try 4: date as query param only
+    r5 = requests.put(url, auth=tx_auth(token),
+                      params={"paymentDate": date},
+                      json={"paidAmount": amount, "paymentTypeId": 1},
+                      timeout=30)
+    print(f"PUT /invoice/{invoice_id}/:payment (mixed) -> {r5.status_code}: {r5.text[:300]}")
 
 
 def do_create_credit_note(base_url: str, token: str, payload: dict) -> None:

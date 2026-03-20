@@ -688,6 +688,12 @@ def do_create_payroll(base_url: str, token: str, payload: dict) -> None:
         postings.append(make_posting(base_url, token, date, bonus_desc, 5000, bonus, row=3))
         postings.append(make_posting(base_url, token, date, bonus_desc, 2910, -bonus, row=4))
 
+    for posting in postings:
+        if posting["account"].get("id") and employee_id:
+            # Check if this is the 2910 posting (credit side)
+            if posting["amount"] < 0:
+                posting["employee"] = {"id": employee_id}
+
     voucher_body = {
         "date": date,
         "description": description,

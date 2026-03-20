@@ -296,20 +296,20 @@ def make_posting(
 
 
 def lookup_vat_type_mva3(base_url: str, token: str) -> Optional[int]:
-    """Resolve VAT type id for standard sales (mva-kode 3 / 25% / 'høy')."""
-    r_vat = tx_get(base_url, token, "/ledger/vatType", {"count": 10})
+    """Resolve output VAT type id (mva-kode 3: Utgående avgift, høy sats)."""
+    vat_type_id = None
+    r_vat = tx_get(base_url, token, "/ledger/vatType", {"count": 20})
     if r_vat.status_code == 200:
         vat_types = r_vat.json().get("values", [])
         for vt in vat_types:
-            if (
-                vt.get("number") == 3
-                or "høy" in vt.get("name", "").lower()
-                or vt.get("percentage") == 25
-            ):
-                vid = vt["id"]
-                print(f"VAT type 3 -> id {vid}")
-                return vid
-    return None
+            name = vt.get("name", "").lower()
+            number = str(vt.get("number", ""))
+            # Look for output VAT high rate (mva-kode 3: Utgående avgift, høy sats)
+            if number == "3" or ("utg" in name and "høy" in name):
+                vat_type_id = vt["id"]
+                print(f"Output VAT type -> id {vat_type_id} ({vt.get('name')})")
+                break
+    return vat_type_id
 
 
 def set_bank_account(base_url: str, token: str) -> bool:

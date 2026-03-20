@@ -592,7 +592,7 @@ def do_create_travel_expense(base_url: str, token: str, payload: dict) -> None:
     # Find employee by email or use first
     employee_id = None
     if employee_email:
-        r = tx_get(base_url, token, "/employee", {"email": employee_email})
+        r = tx_get(base_url, token, "/employee", params={"email": employee_email})
         if r.status_code == 200:
             employees = r.json().get("values", [])
             if employees:
@@ -609,6 +609,7 @@ def do_create_travel_expense(base_url: str, token: str, payload: dict) -> None:
 
     body = {
         "employee": {"id": employee_id},
+        "title": description,
         "travelDetails": {
             "departureDate": date + "T08:00:00",
             "returnDate": date + "T18:00:00",

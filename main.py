@@ -701,8 +701,6 @@ def do_create_travel_expense(base_url: str, token: str, payload: dict) -> None:
     employee_email = payload.get("employeeEmail", "")
     date = payload.get("date", "2025-03-20")
     title = payload.get("description", "Travel expense")
-    departure_from = payload.get("departureFrom", "Oslo")
-    destination = payload.get("destination", "Bergen")
 
     # Find employee by email or use first
     employee_id = None
@@ -725,14 +723,7 @@ def do_create_travel_expense(base_url: str, token: str, payload: dict) -> None:
     body = {
         "employee": {"id": employee_id},
         "title": title,
-        "travelDetails": {
-            "departureDate": date + "T08:00:00",
-            "returnDate": date + "T18:00:00",
-            "departureFrom": departure_from,
-            "destination": destination,
-            "departureTransportation": "CAR",
-            "returnTransportation": "CAR",
-        },
+        "date": date,
         "isCompleted": False,
     }
     r2 = tx_post(base_url, token, "/travelExpense", body)

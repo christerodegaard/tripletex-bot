@@ -300,7 +300,11 @@ def do_create_product(base_url: str, token: str, payload: dict) -> None:
             body[field] = payload[field]
     if payload.get("vatTypeId"):
         body["vatTypeId"] = payload["vatTypeId"]
-    tx_post(base_url, token, "/product", body)
+    r = tx_post(base_url, token, "/product", body)
+    if r.status_code == 422 and "er i bruk" in r.text:
+        print("Product number in use, retrying without number")
+        body.pop("number", None)
+        r = tx_post(base_url, token, "/product", body)
 
 
 def do_update_product(base_url: str, token: str, payload: dict) -> None:
@@ -532,8 +536,12 @@ def do_register_payment(base_url: str, token: str, payload: dict) -> None:
                 customers = r.json().get("values", [])
                 if customers:
                     customer_id = customers[0]["id"]
-                    r2 = tx_get(base_url, token, "/invoice",
-                               {"customerId": customer_id, "count": 1})
+                    r2 = tx_get(base_url, token, "/invoice", {
+                        "customerId": customer_id,
+                        "invoiceDateFrom": "2020-01-01",
+                        "invoiceDateTo": "2030-12-31",
+                        "count": 1,
+                    })
                     if r2.status_code == 200:
                         invoices = r2.json().get("values", [])
                         if invoices:
@@ -554,8 +562,11 @@ def do_register_payment(base_url: str, token: str, payload: dict) -> None:
     payment_body = {
         "paymentDate": date,
         "paidAmount": amount,
+        "paymentTypeId": 1,
     }
-    tx_post(base_url, token, f"/invoice/{invoice_id}/:payment", payment_body)
+    url = f"{base_url.rstrip('/')}/invoice/{invoice_id}/:payment"
+    r2 = requests.put(url, auth=tx_auth(token), json=payment_body, timeout=30)
+    print(f"PUT /invoice/{invoice_id}/:payment -> {r2.status_code}: {r2.text[:200]}")
 
 
 def do_create_credit_note(base_url: str, token: str, payload: dict) -> None:

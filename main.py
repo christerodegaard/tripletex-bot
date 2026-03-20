@@ -489,10 +489,6 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
             for item in raw_orders
         )
 
-        # Use standard Norwegian accounts - don't look up dynamically as results vary
-        revenue_account = 3000  # Salgsinntekter
-        ar_account = 1500       # Kundefordringer
-
         description = f"Faktura {customer_name} {invoice_date} (ordre {order_id})"
         voucher_body = {
             "date": invoice_date,
@@ -501,14 +497,14 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
                 {
                     "date": invoice_date,
                     "description": description,
-                    "account": {"number": ar_account},
+                    "account": {"number": 1500},
                     "amount": total_amount,
                     "amountCurrency": total_amount,
                 },
                 {
                     "date": invoice_date,
                     "description": description,
-                    "account": {"number": revenue_account},
+                    "account": {"number": 3000},
                     "amount": -total_amount,
                     "amountCurrency": -total_amount,
                 }
@@ -601,10 +597,13 @@ def do_create_payroll(base_url: str, token: str, payload: dict) -> None:
         print("No employee found for payroll")
         return
 
-    # Try salary/transaction with minimal body (no employee field — API rejects it)
+    # Try salary/transaction with minimal body (no top-level employee — API rejects it)
     r2 = tx_post(base_url, token, "/salary/transaction", {
         "date": date,
-        "payslips": [{"employee": {"id": employee_id}, "salary": base_salary}]
+        "payslips": [{
+            "employee": {"id": employee_id},
+            "amount": base_salary
+        }]
     })
     print(f"salary/transaction -> {r2.status_code}: {r2.text[:200]}")
     if r2.status_code in (200, 201):

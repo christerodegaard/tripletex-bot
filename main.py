@@ -381,15 +381,18 @@ def do_create_supplier(base_url: str, token: str, payload: dict) -> None:
         body["physicalAddress"] = addr
     r = tx_post(base_url, token, "/customer", body)
     if r.status_code in (200, 201):
-        supplier_id = r.json().get("value", {}).get("id")
-        if supplier_id:
-            put_url = f"{base_url.rstrip('/')}/customer/{supplier_id}"
-            put_body = {**r.json().get("value", {}), "isCustomer": False}
+        val = r.json().get("value", {})
+        sid = val.get("id")
+        if sid:
+            put_body = {
+                k: v
+                for k, v in val.items()
+                if k not in ("url", "changes", "displayName")
+            }
+            put_body["isCustomer"] = False
+            put_url = f"{base_url.rstrip('/')}/customer/{sid}"
             r2 = requests.put(put_url, auth=tx_auth(token), json=put_body, timeout=30)
-            print(
-                f"PUT /customer/{supplier_id} isCustomer=False -> "
-                f"{r2.status_code}: {r2.text[:100]}"
-            )
+            print(f"PUT supplier isCustomer=False -> {r2.status_code}: {r2.text[:100]}")
 
 
 def do_create_product(base_url: str, token: str, payload: dict) -> None:

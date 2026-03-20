@@ -289,6 +289,19 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
     invoice_date = payload.get("invoiceDate", "2025-03-20")
     due_date = payload.get("invoiceDueDate", "2025-04-20")
 
+    # Set company bank account number (required for invoicing)
+    r_company = tx_get(base_url, token, "/company")
+    if r_company.status_code == 200:
+        company = r_company.json().get("value", {})
+        company_id = company.get("id")
+        if company_id and not company.get("bankAccountNumber"):
+            requests.put(
+                f"{base_url.rstrip('/')}/company/{company_id}",
+                auth=tx_auth(token),
+                json={"bankAccountNumber": "15060126900"},
+                timeout=30,
+            )
+
     # Step 1: find or create customer
     r = tx_get(base_url, token, "/customer", {"name": customer_name, "count": 1})
     customer_id = None

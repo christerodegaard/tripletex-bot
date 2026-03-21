@@ -834,6 +834,26 @@ def do_create_payroll(base_url: str, token: str, payload: dict) -> None:
 
     dt = datetime.strptime(date, "%Y-%m-%d")
 
+    r_emp_check = tx_get(
+        base_url,
+        token,
+        "/employee/employment",
+        {"employeeId": employee_id, "count": 1},
+    )
+    if r_emp_check.status_code == 200:
+        emps = r_emp_check.json().get("values", [])
+        if not emps:
+            r_emp_create = tx_post(
+                base_url,
+                token,
+                "/employee/employment",
+                {
+                    "employee": {"id": employee_id},
+                    "startDate": date[:7] + "-01",
+                },
+            )
+            print(f"Created employment -> {r_emp_create.status_code}")
+
     r2 = tx_post(base_url, token, "/salary/transaction", {
         "year": dt.year,
         "month": dt.month,

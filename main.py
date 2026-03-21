@@ -285,31 +285,23 @@ def get_vat_type_id_by_number(
     return None
 
 
-def get_account_id(base_url: str, token: str, number: int) -> int:
-    """Look up account ID by account number. Cache results."""
+def get_account_id(
+    base_url: str, token: str, number: int
+) -> Optional[int]:
     cache = _get_account_cache()
-    n = int(number)
-    if n in cache:
-        return cache[n]
-    r = tx_get(base_url, token, "/ledger/account", {"number": n, "count": 1})
+    key = f"acct_{number}"
+    if key in cache:
+        return cache[key]
+    r = tx_get(base_url, token, "/ledger/account", {"number": number, "count": 1})
     if r.status_code == 200:
-        accounts = r.json().get("values", [])
-        if accounts:
-            account_id = accounts[0]["id"]
-            cache[n] = account_id
-            print(f"Account {n} -> id {account_id}")
-            return account_id
-    # Fallback: try searching with from/count
-    r2 = tx_get(base_url, token, "/ledger/account", {"from": 0, "count": 1000})
-    if r2.status_code == 200:
-        accounts = r2.json().get("values", [])
-        for acc in accounts:
-            acc_no = acc.get("number")
-            if acc_no is not None and int(acc_no) == n:
-                cache[n] = acc["id"]
-                return acc["id"]
-    print(f"WARNING: Could not find account ID for number {n}")
-    return n  # fallback to number itself
+        vals = r.json().get("values", [])
+        if vals:
+            aid = vals[0]["id"]
+            cache[key] = aid
+            print(f"Account {number} -> id {aid}")
+            return aid
+    print(f"WARNING: Could not find account {number}")
+    return None
 
 
 def make_posting(
@@ -323,7 +315,8 @@ def make_posting(
     row: int = 1,
     vat_type_id: Optional[int] = None,
 ) -> dict:
-    account_id = get_account_id(base_url, token, account_number)
+    resolved = get_account_id(base_url, token, account_number)
+    account_id = resolved if resolved is not None else account_number
     posting = {
         "row": row,
         "date": date,
@@ -634,6 +627,8 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
         description = f"Faktura {customer_name} {invoice_date} (ordre {order_id})"
         postings = []
         acct_1500 = get_account_id(base_url, token, 1500)
+        if acct_1500 is None:
+            acct_1500 = 1500
         vat_25 = get_vat_type_id_by_number(base_url, token, "3")
         vat_15 = get_vat_type_id_by_number(base_url, token, "33")
         vat_0 = get_vat_type_id_by_number(base_url, token, "6")
@@ -653,6 +648,8 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
 
             revenue_account_num = VAT_ACCOUNT_MAP.get(vat_rate, 3000)
             acct_revenue = get_account_id(base_url, token, revenue_account_num)
+            if acct_revenue is None:
+                acct_revenue = revenue_account_num
 
             debit = {
                 "row": row,
@@ -788,7 +785,7 @@ def do_create_payroll(base_url: str, token: str, payload: dict) -> None:
     r2 = tx_post(base_url, token, "/salary/transaction", {
         "year": dt.year,
         "month": dt.month,
-        "payslips": [{"employee": {"id": employee_id}, "salary": base_salary}],
+        "payslips": [{"employee": {"id": employee_id}, "amount": base_salary}],
     })
     print(f"salary/transaction -> {r2.status_code}: {r2.text[:200]}")
     if r2.status_code in (200, 201):

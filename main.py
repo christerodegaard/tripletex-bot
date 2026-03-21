@@ -603,6 +603,7 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
     if not order_id:
         print("No order ID returned")
         return
+    print(f"Order created successfully, order_id={order_id} — proceeding to invoice")
 
     # Step 3: invoice from order
     invoice_body = {
@@ -619,9 +620,9 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
         print("Bank account missing - falling back to ledger voucher")
 
         VAT_ACCOUNT_MAP = {
-            25: 3000,  # Salgsinntekt, avgiftspliktig
-            15: 3100,  # Salgsinntekt, middels sats (food/beverage)
-            0: 3200,  # Salgsinntekt, avgiftsfri (exempt)
+            25: 3000,
+            15: 3100,
+            0: 3000,  # exempt: 3000 with no vatType
         }
 
         description = f"Faktura {customer_name} {invoice_date} (ordre {order_id})"
@@ -631,7 +632,6 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
             acct_1500 = 1500
         vat_25 = get_vat_type_id_by_number(base_url, token, "3")
         vat_15 = get_vat_type_id_by_number(base_url, token, "33")
-        vat_0 = get_vat_type_id_by_number(base_url, token, "6")
 
         row = 1
         for item in raw_orders:
@@ -675,8 +675,6 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
                 credit["vatType"] = {"id": vat_25}
             elif vat_rate == 15 and vat_15:
                 credit["vatType"] = {"id": vat_15}
-            elif vat_rate == 0 and vat_0:
-                credit["vatType"] = {"id": vat_0}
 
             postings.append(credit)
             row += 1
@@ -971,10 +969,36 @@ def do_register_payment(base_url: str, token: str, payload: dict) -> None:
 
 
 def do_reverse_payment(base_url: str, token: str, payload: dict) -> None:
-    p = dict(payload)
-    amt = p.get("amount", 0)
-    p["amount"] = -abs(amt) if amt else -1
-    do_register_payment(base_url, token, p)
+    date = payload.get("date", "2026-03-20")
+
+    r_v = tx_get(
+        base_url,
+        token,
+        "/ledger/voucher",
+        {"dateFrom": "2020-01-01", "dateTo": "2030-12-31", "count": 10},
+    )
+    if r_v.status_code == 200:
+        vouchers = r_v.json().get("values", [])
+        payment_vouchers = [
+            v for v in vouchers if "etaling" in v.get("description", "")
+        ]
+        all_vouchers = payment_vouchers if payment_vouchers else vouchers
+        for voucher in all_vouchers:
+            vid = voucher.get("id")
+            if vid:
+                rev_url = f"{base_url.rstrip('/')}/ledger/voucher/{vid}/:reverse"
+                r_rev = requests.put(
+                    rev_url,
+                    auth=tx_auth(token),
+                    params={"date": date},
+                    timeout=30,
+                )
+                print(
+                    f"Reverse voucher {vid} -> {r_rev.status_code}: {r_rev.text[:200]}"
+                )
+                if r_rev.status_code in (200, 201):
+                    return
+    print("Could not reverse any voucher")
 
 
 def do_create_credit_note(base_url: str, token: str, payload: dict) -> None:

@@ -109,9 +109,12 @@ create_invoice
              "invoiceDueDate": "YYYY-MM-DD",
              "orders": [ { "description": string,
                            "unitPriceExcludingVatCurrency": number,
-                           "count": number, "vatRate"?: number } ] }
+                           "count": number, "vatRate"?: number } ],
+             "projectName"?: string, "projectId"?: number }
   Extract vatRate per line when mentioned: 25 = high rate, 15 = food/reduced, 0 = exempt.
   Maps to VAT types: 25 -> number 3, 15 -> 33, 0 -> no vatType on the line.
+  When the prompt mentions fastpris / prix forfaitaire / fixed price on a project,
+  ALWAYS include projectName matching that project name.
 
 create_project
   payload: { "name": string, "projectManagerEmail"?: string,
@@ -574,6 +577,29 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
         print("Could not find or create customer for invoice - aborting")
         return
 
+    project_id = None
+    if payload.get("projectId") is not None:
+        try:
+            project_id = int(payload["projectId"])
+            print(f"Linking order to project id={project_id} (from projectId)")
+        except (TypeError, ValueError):
+            project_id = None
+    if project_id is None and payload.get("projectName"):
+        r_proj = tx_get(
+            base_url,
+            token,
+            "/project",
+            {"name": payload["projectName"], "count": 1},
+        )
+        if r_proj.status_code == 200:
+            projs = r_proj.json().get("values", [])
+            if projs:
+                project_id = projs[0]["id"]
+                print(
+                    f"Linking order to project id={project_id} "
+                    f"({payload['projectName']!r})"
+                )
+
     raw_orders = payload.get("orders") or []
     if not raw_orders:
         raw_orders = [{"description": "Service",
@@ -595,6 +621,8 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
         "deliveryDate": invoice_date,
         "orderLines": order_lines,
     }
+    if project_id:
+        order_body["project"] = {"id": project_id}
     r3 = tx_post(base_url, token, "/order", order_body)
     if r3.status_code not in (200, 201):
         print(
@@ -607,6 +635,8 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
             "deliveryDate": invoice_date,
             "lines": order_lines,
         }
+        if project_id:
+            order_body["project"] = {"id": project_id}
         r3 = tx_post(base_url, token, "/order", order_body)
     if r3.status_code not in (200, 201):
         print(f"Order creation failed ({r3.status_code})")

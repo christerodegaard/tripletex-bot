@@ -214,6 +214,10 @@ Rules:
 - Return ONLY valid JSON, nothing else.
 - For payroll/salary/lønn/lønnskjøring requests, ALWAYS use create_payroll, never no_op.
 - For accounting dimension requests, ALWAYS use create_accounting_dimension, never no_op.
+- When the prompt says "one of your customers" or "en av kundene" or
+  "einer Ihrer Kunden" without naming a specific customer, do NOT use "Kunde" as
+  customer_name. Look up the customer with an overdue/pending invoice by leaving
+  customer_name empty or using the organization number if provided.
 """
 
 
@@ -557,22 +561,44 @@ def do_create_department(base_url: str, token: str, payload: dict) -> None:
 
 
 def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
-    customer_name = payload.get("customer_name", "Unknown Customer")
+    customer_name = payload.get("customer_name") or ""
+    if customer_name.lower() in ("kunde", "customer", "client", ""):
+        customer_name = ""
     invoice_date = payload.get("invoiceDate", "2025-03-20")
     due_date = payload.get("invoiceDueDate", "2025-04-20")
 
-    # Step 1: find or create customer — one GET /customer max; same customer_id for order + invoice
-    r = tx_get(base_url, token, "/customer", {"name": customer_name, "count": 1})
     customer_id = None
-    if r.status_code == 200:
-        customers = r.json().get("values", [])
-        if customers:
-            customer_id = customers[0]["id"]
-    if customer_id is None:
-        r2 = tx_post(base_url, token, "/customer",
-                     {"name": customer_name, "isCustomer": True})
-        if r2.status_code in (200, 201):
-            customer_id = r2.json().get("value", {}).get("id")
+    if customer_name:
+        r = tx_get(base_url, token, "/customer", {"name": customer_name, "count": 1})
+        if r.status_code == 200:
+            customers = r.json().get("values", [])
+            if customers:
+                customer_id = customers[0]["id"]
+        if customer_id is None:
+            r2 = tx_post(base_url, token, "/customer",
+                         {"name": customer_name, "isCustomer": True})
+            if r2.status_code in (200, 201):
+                customer_id = r2.json().get("value", {}).get("id")
+    else:
+        r_inv = tx_get(
+            base_url,
+            token,
+            "/invoice",
+            {
+                "invoiceDateFrom": "2020-01-01",
+                "invoiceDateTo": "2030-12-31",
+                "count": 1,
+            },
+        )
+        if r_inv.status_code == 200:
+            invs = r_inv.json().get("values", [])
+            if invs:
+                inv = invs[0]
+                cobj = inv.get("customer")
+                if isinstance(cobj, dict):
+                    customer_id = cobj.get("id")
+                if customer_id is None:
+                    customer_id = inv.get("customerId")
     if customer_id is None:
         print("Could not find or create customer for invoice - aborting")
         return
@@ -662,18 +688,24 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
         print("Bank account missing - falling back to ledger voucher")
 
         VAT_ACCOUNT_MAP = {
-            25: 3000,
-            15: 3100,
-            0: 3000,  # exempt: 3000 with no vatType
+            25: 3000,  # vatType 3
+            15: 3000,  # vatType 33 (use 3000 since 3100 often missing)
+            0: 3000,  # vatType 6 (locked; needs explicit vatType 6)
         }
 
-        description = f"Faktura {customer_name} {invoice_date} (ordre {order_id})"
+        description = (
+            f"Faktura {customer_name or 'Customer'} {invoice_date} (ordre {order_id})"
+        )
         postings = []
         acct_1500 = get_account_id(base_url, token, 1500)
         if acct_1500 is None:
             acct_1500 = 1500
+        acct_revenue = get_account_id(base_url, token, VAT_ACCOUNT_MAP[25])
+        if acct_revenue is None:
+            acct_revenue = 3000
         vat_25 = get_vat_type_id_by_number(base_url, token, "3")
         vat_15 = get_vat_type_id_by_number(base_url, token, "33")
+        vat_6 = get_vat_type_id_by_number(base_url, token, "6")
 
         row = 1
         for item in raw_orders:
@@ -687,17 +719,6 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
                 vat_rate = int(round(float(raw_vat)))
             if vat_rate not in (0, 15, 25):
                 vat_rate = 25
-
-            revenue_account_num = VAT_ACCOUNT_MAP.get(vat_rate, 3000)
-            acct_revenue = get_account_id(base_url, token, revenue_account_num)
-
-            if acct_revenue is None and revenue_account_num != 3000:
-                print(
-                    f"Account {revenue_account_num} not found, falling back to 3000"
-                )
-                acct_revenue = get_account_id(base_url, token, 3000)
-            if acct_revenue is None:
-                acct_revenue = 3000
 
             debit = {
                 "row": row,
@@ -723,6 +744,11 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
                 credit["vatType"] = {"id": vat_25}
             elif vat_rate == 15 and vat_15:
                 credit["vatType"] = {"id": vat_15}
+            elif vat_rate == 0:
+                if vat_6:
+                    credit["vatType"] = {"id": vat_6}
+                elif vat_25:
+                    credit["vatType"] = {"id": vat_25}
 
             postings.append(credit)
             row += 1
@@ -925,7 +951,9 @@ def do_create_travel_expense(base_url: str, token: str, payload: dict) -> None:
 def do_register_payment(base_url: str, token: str, payload: dict) -> None:
     amount = payload.get("amount", 0)
     date = payload.get("date", "2025-03-20")
-    customer_name = payload.get("customer_name", "")
+    customer_name = payload.get("customer_name") or ""
+    if customer_name.lower() in ("kunde", "customer", "client", ""):
+        customer_name = ""
 
     # Find invoice
     invoice_id = payload.get("invoiceId")

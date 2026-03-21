@@ -597,6 +597,18 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
     }
     r3 = tx_post(base_url, token, "/order", order_body)
     if r3.status_code not in (200, 201):
+        print(
+            f"Order creation failed ({r3.status_code}), retrying with key 'lines' "
+            f"instead of 'orderLines'"
+        )
+        order_body = {
+            "customer": {"id": customer_id},
+            "orderDate": invoice_date,
+            "deliveryDate": invoice_date,
+            "lines": order_lines,
+        }
+        r3 = tx_post(base_url, token, "/order", order_body)
+    if r3.status_code not in (200, 201):
         print(f"Order creation failed ({r3.status_code})")
         return
     order_id = r3.json().get("value", {}).get("id")
@@ -648,8 +660,14 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
 
             revenue_account_num = VAT_ACCOUNT_MAP.get(vat_rate, 3000)
             acct_revenue = get_account_id(base_url, token, revenue_account_num)
+
+            if acct_revenue is None and revenue_account_num != 3000:
+                print(
+                    f"Account {revenue_account_num} not found, falling back to 3000"
+                )
+                acct_revenue = get_account_id(base_url, token, 3000)
             if acct_revenue is None:
-                acct_revenue = revenue_account_num
+                acct_revenue = 3000
 
             debit = {
                 "row": row,
@@ -684,8 +702,14 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
             "description": description,
             "postings": postings,
         }
-        r_voucher = tx_post(base_url, token, "/ledger/voucher", voucher_body)
-        print(f"Invoice fallback voucher -> {r_voucher.status_code}: {r_voucher.text[:300]}")
+        try:
+            r_voucher = tx_post(base_url, token, "/ledger/voucher", voucher_body)
+            print(
+                f"Invoice fallback voucher -> {r_voucher.status_code}: "
+                f"{r_voucher.text[:300]}"
+            )
+        except Exception as e:
+            print(f"Invoice fallback voucher EXCEPTION: {e}")
     else:
         print("Invoice failed")
 

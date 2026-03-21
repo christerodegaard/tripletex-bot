@@ -214,10 +214,11 @@ Rules:
 - Return ONLY valid JSON, nothing else.
 - For payroll/salary/lønn/lønnskjøring requests, ALWAYS use create_payroll, never no_op.
 - For accounting dimension requests, ALWAYS use create_accounting_dimension, never no_op.
-- When the prompt says "one of your customers" or "en av kundene" or
-  "einer Ihrer Kunden" without naming a specific customer, do NOT use "Kunde" as
-  customer_name. Look up the customer with an overdue/pending invoice by leaving
-  customer_name empty or using the organization number if provided.
+- NEVER use generic words like "Kunde", "Customer", "Client" as customer_name values.
+  If the prompt refers to "one of your customers" or "a customer" without a specific name,
+  leave customer_name as empty string "".
+- For prompts mentioning overdue invoices without naming the customer, use register_payment
+  with customer_name: "" so the system finds the invoice automatically.
 """
 
 
@@ -562,10 +563,10 @@ def do_create_department(base_url: str, token: str, payload: dict) -> None:
 
 def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
     customer_name = payload.get("customer_name") or ""
-    if customer_name.lower() in ("kunde", "customer", "client", ""):
+
+    GENERIC_NAMES = {"kunde", "customer", "client", "kunden", "klienten"}
+    if customer_name.lower() in GENERIC_NAMES:
         customer_name = ""
-    invoice_date = payload.get("invoiceDate", "2025-03-20")
-    due_date = payload.get("invoiceDueDate", "2025-04-20")
 
     customer_id = None
     if customer_name:
@@ -574,12 +575,8 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
             customers = r.json().get("values", [])
             if customers:
                 customer_id = customers[0]["id"]
-        if customer_id is None:
-            r2 = tx_post(base_url, token, "/customer",
-                         {"name": customer_name, "isCustomer": True})
-            if r2.status_code in (200, 201):
-                customer_id = r2.json().get("value", {}).get("id")
-    else:
+
+    if customer_id is None and not customer_name:
         r_inv = tx_get(
             base_url,
             token,
@@ -593,15 +590,21 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
         if r_inv.status_code == 200:
             invs = r_inv.json().get("values", [])
             if invs:
-                inv = invs[0]
-                cobj = inv.get("customer")
-                if isinstance(cobj, dict):
-                    customer_id = cobj.get("id")
-                if customer_id is None:
-                    customer_id = inv.get("customerId")
+                customer_id = invs[0].get("customer", {}).get("id")
+                print(f"Found customer from existing invoice: {customer_id}")
+
+    if customer_id is None and customer_name:
+        r2 = tx_post(base_url, token, "/customer",
+                     {"name": customer_name, "isCustomer": True})
+        if r2.status_code in (200, 201):
+            customer_id = r2.json().get("value", {}).get("id")
+
     if customer_id is None:
         print("Could not find or create customer for invoice - aborting")
         return
+
+    invoice_date = payload.get("invoiceDate", "2025-03-20")
+    due_date = payload.get("invoiceDueDate", "2025-04-20")
 
     project_id = None
     if payload.get("projectId") is not None:
@@ -952,7 +955,9 @@ def do_register_payment(base_url: str, token: str, payload: dict) -> None:
     amount = payload.get("amount", 0)
     date = payload.get("date", "2025-03-20")
     customer_name = payload.get("customer_name") or ""
-    if customer_name.lower() in ("kunde", "customer", "client", ""):
+
+    GENERIC_NAMES = {"kunde", "customer", "client", "kunden", "klienten"}
+    if customer_name.lower() in GENERIC_NAMES:
         customer_name = ""
 
     # Find invoice

@@ -268,6 +268,7 @@ def _get_account_cache() -> Dict[Any, int]:
 def get_vat_type_id_by_number(
     base_url: str, token: str, number_str: str
 ) -> Optional[int]:
+    """Look up VAT type id by ledger vatType number (e.g. 3, 33, 6)."""
     cache = _get_account_cache()
     key = f"vattype_{number_str}"
     if key in cache:
@@ -635,6 +636,7 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
         acct_1500 = get_account_id(base_url, token, 1500)
         vat_25 = get_vat_type_id_by_number(base_url, token, "3")
         vat_15 = get_vat_type_id_by_number(base_url, token, "33")
+        vat_0 = get_vat_type_id_by_number(base_url, token, "6")
 
         row = 1
         for item in raw_orders:
@@ -676,6 +678,8 @@ def do_create_invoice(base_url: str, token: str, payload: dict) -> None:
                 credit["vatType"] = {"id": vat_25}
             elif vat_rate == 15 and vat_15:
                 credit["vatType"] = {"id": vat_15}
+            elif vat_rate == 0 and vat_0:
+                credit["vatType"] = {"id": vat_0}
 
             postings.append(credit)
             row += 1
